@@ -1,0 +1,151 @@
+#!/usr/bin/python
+
+import os
+import pwd
+import sys
+import json
+import errno
+import urllib
+import classad
+import htcondor
+import optparse
+import urlparse
+
+g_datasvc = "https://cmsweb.cern.ch/phedex/datasvc"
+g_instance = "prod"
+g_type = "json"
+
+g_acct_grp = "cms.other.t3"
+
+g_cvmfs = '/cvmfs/cms-data.unl.edu'
+
+def parse_opts():
+    usage = '%prog [options] dataset tmpdir'
+    parser = optparse.OptionParser(usage=usage)
+    parser.add_option("-s", "--sites", dest="sites",
+                      help="Sites to crawl for CMS data.")
+    parser.add_option("-g", "--gigabytes", dest="gigabytes", default=100,
+                      help="Approximate job size in GB.", type="int")
+    parser.add_option("--dryrun", dest="dryrun", action="store_true",
+                      help="Dry-run; do not actually submit jobs",
+                      default=False)
+    parser.add_option("-b", "--base", default="root://srm.unl.edu",
+                      help="Base URL for path", dest="base")
+    opts, args = parser.parse_args()
+
+    if len(args) != 2:
+        parser.print_usage()
+        sys.exit(1)
+
+    sites = opts.sites.split()
+    if sites == None:
+        print >> sys.stderr, "Sites must be specified"
+        parser.print_usage()
+        sys.exit(1)
+    opts.sites = opts.sites.split(",")
+
+    return opts, args
+
+
+def submit_job(schedd, job, dest):
+    working_dir = os.path.abspath(os.path.join(dest, "condor_out"))
+    try:
+        os.makedirs(working_dir)
+    except OSError, oe:
+        if oe.errno != errno.EEXIST:
+            raise
+    pw = pwd.getpwuid(os.geteuid())
+    x509 = "/tmp/x509up_u%d" % pw.pw_uid
+    arg_list = ["-n", "10", "-f", "failed", os.path.split(job)[1], "."]
+    arg_str = classad.Function("listToArgs", arg_list)
+    in_files = ["cvmfs_swissknife", "libtbb_cvmfs.so.2", "libtbbmalloc_cvmfs.so.2", "pyxrootd", "XRootD", job]
+    in_files = ", ".join([os.path.abspath(i) for i in in_files])
+    working_dir_prefix = os.path.join(working_dir, "job_")
+    ad = {'Arguments': arg_str,
+          'Cmd': os.path.abspath("./cvmfs-file-sync"),
+          'Environment': 'PATH=.:/usr/bin:/bin LD_LIBRARY_PATH=. PYTHONUNBUFFERED=1',
+          'TransferInput': in_files,
+          'TransferOutput': ",".join(["store", "failed"]),
+          'Out': "out",
+          'Err': "err",
+          'UserLog': os.path.abspath(os.path.join(working_dir, "log")),
+          'Iwd': classad.Function("strcat", working_dir_prefix, classad.Attribute("ClusterId")),
+          'AccountingGroup': "%s.%s" % (g_acct_grp, pw.pw_name),
+          'x509userproxy': x509,
+          'RequestMemory': 1024,
+         }
+    cluster = schedd.submit(ad)
+    try:
+        os.makedirs(working_dir_prefix + str(cluster))
+    except OSError, oe:
+        if oe.errno != errno.EEXIST:
+            raise
+
+
+def get_dataset_files(sites, dataset):
+    base_url = g_datasvc + "/" + g_type + "/" + g_instance + "/filereplicas"
+    urlparts = urlparse.urlparse(base_url)
+    urlparts = list(urlparts)
+    query = urlparse.parse_qsl(urlparts[4])
+    for site in sites:
+        query.append(("node", site))
+    query.append(("dataset", dataset))
+    urlparts[4] = urllib.urlencode(query)
+    url = urlparse.urlunparse(urlparts)
+    print "Querying", url
+
+    fd = urllib.urlopen(url)
+    info = json.load(fd)[u'phedex']
+    for block in info[u'block']:
+        for file in block['file']:
+            yield str(file['name']), file['bytes']
+
+
+def main():
+    opts, args = parse_opts()
+
+    try:
+        os.makedirs(args[1])
+    except OSError, oe:
+        if oe.errno != errno.EEXIST:
+            raise
+
+    sum_size = 0
+    files = []
+    count = 0
+    for file, size in get_dataset_files(opts.sites, args[0]):
+        cvmfs_name = g_cvmfs + file
+        try:
+            st = os.stat(cvmfs_name)
+            if st.st_size != size:
+                print "File %s exists but wrong size; re-generating" % file
+            else:
+                # Already there, skip!
+                continue
+        except OSError, oe:
+            if oe.errno != errno.ENOENT:
+                raise
+        files.append(opts.base + "/" + file)
+        sum_size += size
+        if sum_size >= opts.gigabytes*1e9:
+            fd = open(os.path.join(args[1], "job_%d" % count), "w")
+            fd.write("\n".join(files) + "\n")
+            files = []
+            sum_size = 0
+            count += 1
+
+    if not opts.dryrun:
+        schedd = htcondor.Schedd()
+        print "Submitting %d jobs" % count
+        with schedd.transaction() as txn:
+            for idx in range(count):
+                name = os.path.join(args[1], "job_%d" % idx)
+                submit_job(schedd, name, args[1])
+
+
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+

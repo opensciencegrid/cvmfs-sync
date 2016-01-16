@@ -1,0 +1,47 @@
+#!/usr/bin/python
+
+import os
+import sys
+import ldap
+import tempfile
+import optparse
+
+
+def parse_opts():
+    parser = optparse.OptionParser(usage="%prog [option] [output_file]")
+    parser.add_option("-u", "--url", dest="url", help="LDAP server URL", default="ldap://ldap.ligo.org")
+    parser.add_option("-b", "--base", dest="base", help="LDAP server base tree", default="ou=people,dc=ligo,dc=org")
+    parser.add_option("-g", "--group", dest="group", help="Authorized group name", default="Communities:LSCVirgoLIGOGroupMembers")
+    parser.add_option("-w", "--whitelist", dest="whitelist", help="Whitelist filename")
+
+    return parser.parse_args()
+
+
+def main():
+    opts, args = parse_opts()
+    ldap_obj = ldap.initialize(opts.url)
+    query = "(&(isMemberOf=%s)(gridX509subject=*))" % opts.group
+    results = ldap_obj.search_s(opts.base, ldap.SCOPE_ONELEVEL, query, ["gridX509subject"])
+    all_dns = []
+    for result in results:
+        user_dns = result[1].get('gridX509subject', [])
+        all_dns += [i.replace("\n", " ") for i in user_dns]
+
+    if opts.whitelist:
+        for entry in open(opts.whitelist):
+            all_dns.append(entry.strip())
+
+    if args:
+        dir, fname = os.path.split(args[0])
+        fd, name = tempfile.mkstemp(prefix=fname, dir=dir)
+        os.write(fd, "\n".join(all_dns) + "\n")
+        os.close(fd)
+        os.rename(name, args[0])
+    else:
+        for dn in all_dns:
+            print dn
+
+
+if __name__ == '__main__':
+    main()
+

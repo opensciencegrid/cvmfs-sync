@@ -1,0 +1,219 @@
+#!/usr/bin/python
+
+import os
+import sys
+import time
+import errno
+import signal
+import optparse
+import urlparse
+import threading
+
+import XRootD.client
+
+g_failed_files = []
+g_processed_files = []
+g_bytes_xfer = 0
+g_bytes_xfer_lock = threading.Lock()
+
+
+def inc_bytes(count):
+    global g_bytes_xfer
+    g_bytes_xfer_lock.acquire()
+    try:
+        g_bytes_xfer += count
+    finally:
+        g_bytes_xfer_lock.release()
+
+def parse_opts():
+    parser = optparse.OptionParser(usage="%prog input_file dest")
+    parser.add_option("-n", "--concurrency", dest="concurrency",
+                       help="Number of helper processes", default=4,
+                       type="int")
+    parser.add_option("-f", "--failed", dest="failed",
+                      help="Output filename for list of failed files")
+
+    opts, args = parser.parse_args()
+    if opts.failed:
+        open(opts.failed, "w")
+
+    if len(args) != 2:
+        print >> sys.stderr, "Need at least input file list and destination"
+        parser.print_usage()
+        sys.exit(1)
+
+    return opts, args
+
+
+def create_read_callback(offset, readfp, writefd, filename):
+    def read_callback(status, response, hostlist):
+        # NOTE: due to mutex ordering issues, we CANNOT invoke xrootd
+        # functions (including letting objects fall out of scope).
+        #print "Read callback for %s, offset %d, response" % (filename, offset)
+        if status.status:
+            print "Read callback failed for %s:" % filename, status
+            print "Hostlist:", hostlist
+            for host in hostlist.hosts:
+                print "-", host.url
+            g_failed_files.append(filename)
+            # In this case, response is None; close and fail out.
+        if (response == None) or (len(response) == 0):
+            print "Finished processing", filename
+            os.close(writefd)
+        else:
+            inc_bytes(len(response))
+            os.write(writefd, response)
+            next_offset = offset + len(response)
+            kwargs = {'offset': next_offset,
+                      'size': 1024*1024,
+                      'callback': create_read_callback(next_offset, readfp,
+                                                writefd, filename)
+                     }
+            status = readfp.read(**kwargs)
+            if status.status:
+                print "Failed to create callback for", filename
+                g_failed_files.append(filename)
+
+    return read_callback
+
+
+def kickoff_graft(fp, input_url, output_filename):
+    readfp, writefp = os.pipe()
+    pid = os.fork()
+    if not pid:
+        try:
+            os.dup2(readfp, 0)
+            os.close(writefp)
+            args = ['cvmfs_swissknife', 'graft', '-i', '-', '-o', output_filename, '-Z', 'none']
+            os.execvp("cvmfs_swissknife", args)
+        finally:
+            print "Failed to exec cvmfs_swissknife for processing", input_url
+            os._exit(1)
+    os.close(readfp)
+    callback = create_read_callback(0, fp, writefp, input_url)
+    status = fp.read(offset=0, size=1024*1024, callback=callback)
+    if status.status:
+        print "Failed to create read request for", input_url
+        print "Status:", status
+        print "Killing graft PID", pid
+        os.kill(pid, signal.SIGTERM)
+        g_failed_files.append(input_url)
+        return False
+    return True
+
+
+def process_files(filenames, base_url, output_dir, count):
+    while filenames:
+        chunk_filenames = filenames[:500]
+        filenames = filenames[500:]
+        process_files_impl(chunk_filenames, base_url, output_dir, count)
+
+
+def process_files_impl(filenames, base_url, output_dir, count):
+    current = 0
+    worklist = []
+
+    # Serialize on opening files
+    for filename in filenames:
+        input_url = base_url + filename
+        output_filename = output_dir + filename
+        if os.path.exists(output_filename):
+            print "Skipping file %s as %s already exists." % \
+                (input_url, output_filename)
+            continue
+        try:
+            os.makedirs(os.path.split(output_filename)[0])
+        except OSError, oe:
+            if oe.errno != errno.EEXIST:
+                raise
+        fp = XRootD.client.File()
+        status = fp.open(input_url)[0]
+        if status.status:
+            g_failed_files.append(input_url)
+            print "Failed to open file %s:" % input_url, status
+        else:
+            worklist.append((filename, fp))
+
+    # Process in parallel.
+    try:
+        for filename, fp in worklist:
+            input_url = base_url + filename
+            output_filename = output_dir + filename
+            if current == count:
+                status = os.wait()[1]
+                current -= 1
+                if status:
+                    print "Failed to process file; graft creation exited with error", status
+            print "Processing file %s -> %s" % (input_url, output_filename)
+            kickoff_graft(fp, input_url, output_filename)
+            current += 1
+    finally:
+        # Process tails - must do this before exceptions are propagated as we
+        # may deadlock if there are callbacks while we destroy the open file
+        # handles.
+        while current:
+            status = os.wait()[1]
+            current -= 1
+            if status:
+                print "Failed to process file; graft creation exited with error", status
+        worklist = []
+        # It's not possible to solve the race condition inherent here - we have no
+        # way to notify the main thread the callback pool is done without holding
+        # the GIL.  So, we do this any pray.
+        time.sleep(1)
+
+
+def main():
+    opts, args = parse_opts()
+    input_file = args[0]
+    dest = args[1]
+
+    srcs = []
+    for line in open(input_file):
+        line = line.strip()
+        if line.startswith("#"):
+            continue
+        srcs.append(line)
+    print "%d inputs to process." % len(srcs)
+
+    concurrency = opts.concurrency
+    starttime = time.time()
+
+    base_url = None
+    filenames = []
+    for src in srcs:
+        src_parsed = urlparse.urlparse(src)
+        src_base_url = src_parsed.scheme + "://" + src_parsed.netloc
+        if not base_url:
+            base_url = src_base_url
+        elif src_base_url != base_url:
+            printf >> sys.stderr, "File %s does not match base URL %s." % (src, base_url)
+            return 1
+        filenames.append(src_parsed.path)
+    process_files(filenames, base_url, dest, concurrency)
+
+    processing_time = time.time() - starttime
+    print "Total of %d bytes processed in %.2f seconds." % (g_bytes_xfer, processing_time)
+    print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
+
+    if not opts.failed:
+        if g_failed_files:
+            print "Failed files:"
+            for file in g_failed_files:
+                print file
+    else:
+        fh = open(opts.failed, "w")
+        fh.write("\n".join(g_failed_files))
+    if not g_failed_files:
+        print "Synchronization completed successfully!"
+        return 0
+    else:
+        print "There were %d synchronization failures." % len(g_failed_files)
+        # TODO: cleanup partial grafts
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+
