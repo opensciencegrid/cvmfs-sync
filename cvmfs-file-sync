@@ -17,6 +17,9 @@ g_bytes_xfer = 0
 g_bytes_xfer_lock = threading.Lock()
 
 
+g_chunk_size = 64
+
+
 def inc_bytes(count):
     global g_bytes_xfer
     g_bytes_xfer_lock.acquire()
@@ -84,7 +87,7 @@ def kickoff_graft(fp, input_url, output_filename):
         try:
             os.dup2(readfp, 0)
             os.close(writefp)
-            args = ['cvmfs_swissknife', 'graft', '-i', '-', '-o', output_filename, '-Z', 'none']
+            args = ['cvmfs_swissknife', 'graft', "-c", str(g_chunk_size), '-i', '-', '-o', output_filename, '-Z', 'none']
             os.execvp("cvmfs_swissknife", args)
         finally:
             print "Failed to exec cvmfs_swissknife for processing", input_url
