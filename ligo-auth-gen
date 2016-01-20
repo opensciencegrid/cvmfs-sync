@@ -25,7 +25,7 @@ def main():
     all_dns = []
     for result in results:
         user_dns = result[1].get('gridX509subject', [])
-        all_dns += [i.replace("\n", " ") for i in user_dns]
+        all_dns += [i.replace("\n", " ") for i in user_dns if i.startswith("/")]
 
     if opts.whitelist:
         for entry in open(opts.whitelist):

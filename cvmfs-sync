@@ -42,7 +42,7 @@ def parse_opts():
     return opts, args
 
 
-def create_read_callback(offset, readfp, writefd, filename):
+def create_read_callback(offset, readfp, writefd, filename, pid):
     def read_callback(status, response, hostlist):
         # NOTE: due to mutex ordering issues, we CANNOT invoke xrootd
         # functions (including letting objects fall out of scope).
@@ -53,6 +53,7 @@ def create_read_callback(offset, readfp, writefd, filename):
             for host in hostlist.hosts:
                 print "-", host.url
             g_failed_files.append(filename)
+            os.kill(pid, signal.SIGKILL)
             # In this case, response is None; close and fail out.
         if (response == None) or (len(response) == 0):
             print "Finished processing", filename
@@ -64,12 +65,13 @@ def create_read_callback(offset, readfp, writefd, filename):
             kwargs = {'offset': next_offset,
                       'size': 1024*1024,
                       'callback': create_read_callback(next_offset, readfp,
-                                                writefd, filename)
+                                                writefd, filename, pid)
                      }
             status = readfp.read(**kwargs)
             if status.status:
                 print "Failed to create callback for", filename
                 g_failed_files.append(filename)
+                os.kill(pid, signal.SIGKILL)
 
     return read_callback
 
@@ -87,13 +89,13 @@ def kickoff_graft(fp, input_url, output_filename):
             print "Failed to exec cvmfs_swissknife for processing", input_url
             os._exit(1)
     os.close(readfp)
-    callback = create_read_callback(0, fp, writefp, input_url)
+    callback = create_read_callback(0, fp, writefp, input_url, pid)
     status = fp.read(offset=0, size=1024*1024, callback=callback)
     if status.status:
         print "Failed to create read request for", input_url
         print "Status:", status
         print "Killing graft PID", pid
-        os.kill(pid, signal.SIGTERM)
+        os.kill(pid, signal.SIGKILL)
         g_failed_files.append(input_url)
         return False
     return True
@@ -111,13 +113,19 @@ def process_files_impl(filenames, base_url, output_dir, count):
     worklist = []
 
     # Serialize on opening files
-    for filename in filenames:
+    for filename, size in filenames:
         input_url = base_url + filename
         output_filename = output_dir + filename
         if os.path.exists(output_filename):
-            print "Skipping file %s as %s already exists." % \
-                (input_url, output_filename)
-            continue
+            st = os.stat(output_filename)
+            if size == st.st_size:
+                #print "Skipping file %s as %s already exists." % \
+                #    (input_url, output_filename)
+                continue
+            else:
+                print "Size mismatch!  Regenerating file %s (size %d) -> %s (size %d)" % \
+                    (input_url, size, output_filename, st.st_size)
+                os.unlink(output_filename)
         try:
             os.makedirs(os.path.split(output_filename)[0])
         except OSError, oe:
@@ -177,7 +185,7 @@ def process_dir(base_url, directory):
                 worklist.append(cwd + "/" + entry.name)
             else:
                 fname = cwd + "/" + entry.name
-                filelist.append(fname[base_len:])
+                filelist.append((fname[base_len:], entry.statinfo.size))
     return filelist
 
 

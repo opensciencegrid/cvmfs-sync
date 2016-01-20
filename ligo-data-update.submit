@@ -1,6 +1,7 @@
 
 universe = local
 
+environment = XRD_LOGLEVEL=Debug PYTHONUNBUFFERED=1
 executable = ligo-data-update
 use_x509userproxy = true
 output = ligo_update_logs/lastrun.out
@@ -10,8 +11,10 @@ log = ligo_update_logs/log
 cron_month = *
 cron_day_of_month = *
 cron_day_of_week = *
-cron_hour = 1,4,7,10,13,16,19,22
+cron_hour = *
 cron_minute = 14
+
+on_exit_remove = false
 
 queue
 

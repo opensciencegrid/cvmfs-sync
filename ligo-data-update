@@ -19,6 +19,11 @@ echo "Starting LIGO frame data update at `date`"
 if `voms-proxy-info --exists --valid 1:0`; then
   voms-proxy-info -all
   echo "Valid proxy!"
+  # Proxy is valid but VOMS extension is about to expire.
+  if [ `voms-proxy-info -actimeleft` -lt 3600 ]; then
+    echo "Generating new VOMS extensions."
+    voms-proxy-init -voms osg:/osg/ligo -rfc -valid 168:00 -noregen
+  fi
 else
   echo "Proxy has expired."
   exit 1
