@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import os
+import re
 import sys
 import time
 import errno
@@ -21,6 +22,8 @@ g_processed_files = []
 g_bytes_xfer = 0
 g_bytes_xfer_lock = threading.Lock()
 
+g_starttime = time.time()
+
 
 def inc_bytes(count):
     global g_bytes_xfer
@@ -37,6 +40,10 @@ def parse_opts():
                        type="int")
     parser.add_option("-f", "--failed", dest="failed",
                       help="Output filename for list of failed files")
+    parser.add_option("-t", "--max-time", dest="max_time", type="int",
+                      help="Time threshold for starting new batches "
+                           " of transfers.  Specified in minutes",
+                      default = 0)
 
     opts, args = parser.parse_args()
     if len(args) < 2:
@@ -106,17 +113,20 @@ def kickoff_graft(fp, input_url, output_filename):
     return True
 
 
-def process_files(filenames, base_url, output_dir, count):
+def process_files(filenames, base_url, output_dir, count, max_time):
     while filenames:
         chunk_filenames = filenames[:500]
         filenames = filenames[500:]
         process_files_impl(chunk_filenames, base_url, output_dir, count)
+        if (max_time > 0) and ((time.time() - g_starttime) > max_time*60):
+            break
 
 
 def process_files_impl(filenames, base_url, output_dir, count):
     current = 0
     worklist = []
 
+    files_opened = 0
     # Serialize on opening files
     for filename, size in filenames:
         input_url = base_url + filename
@@ -143,6 +153,7 @@ def process_files_impl(filenames, base_url, output_dir, count):
             print "Failed to open file %s:" % input_url, status
         else:
             worklist.append((filename, fp))
+            files_opened += 1
 
     # Process in parallel.
     try:
@@ -166,13 +177,16 @@ def process_files_impl(filenames, base_url, output_dir, count):
             current -= 1
             if status:
                 print "Failed to process file; graft creation exited with error", status
-        worklist = []
-        # It's not possible to solve the race condition inherent here - we have no
-        # way to notify the main thread the callback pool is done without holding
-        # the GIL.  So, we do this any pray.
-        time.sleep(1)
+
+        # A reference in the worklist, to sys.getrefcount, and the loop variable.
+        # If there is an additional ref, there must be an outstanding callback.
+        for filename, fp in worklist:
+            while sys.getrefcount(fp) > 3:
+                print filename, sys.getrefcount(fp)
+                time.sleep(.2)
 
 
+user_dir_regexp = re.compile(r'^/+user/+([A-Za-z0-9.]+)/*$')
 def process_dir(base_url, directory):
     fs = XRootD.client.FileSystem(base_url)
     worklist = [directory]
@@ -180,11 +194,14 @@ def process_dir(base_url, directory):
     base_len = len(directory)
     while worklist:
         cwd = worklist.pop()
+        if user_dir_regexp.match(cwd):
+            cwd += "/public"
         print "Processing", cwd
         status, dirlist = fs.dirlist("/" + cwd,
                                     flags=XRootD.client.flags.DirListFlags.STAT)
         if status.status:
-            raise Exception("Failed to list directory")
+            print "Failed to list directory:", cwd
+            continue
         for entry in dirlist.dirlist:
             if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
                 worklist.append(cwd + "/" + entry.name)
@@ -209,7 +226,7 @@ def main():
         directory = src_parsed.path
         filelist = process_dir(base_url, directory)
         print "Found %d files to process" % len(filelist)
-        process_files(filelist, src, dest, concurrency)
+        process_files(filelist, src, dest, concurrency, opts.max_time)
 
     processing_time = time.time() - starttime
     print "Total of %d bytes processed in %.2f seconds." % (g_bytes_xfer, processing_time)

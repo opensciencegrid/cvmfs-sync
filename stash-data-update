@@ -1,0 +1,31 @@
+#!/bin/sh
+
+pub_failed=1
+
+function finish_txn {
+  if [ $pub_failed -eq 1 ]; then
+    cvmfs_server abort -f
+    exit 1
+  else
+    exec cvmfs_server publish -X stash.osgstorage.org
+  fi
+}
+
+echo "Starting Stash public data update at `date`"
+
+cvmfs_server transaction stash.osgstorage.org
+if [ $? -ne 0 ]; then
+  echo "Failed to start transaction."
+  exit 3
+fi
+
+trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
+
+# For now, publish even on failure - we want to publish partial progress.
+# May revisit later.
+pub_failed=0
+cvmfs_sync_location=$PWD/stash-sync
+pushd ~
+PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user
+popd
+

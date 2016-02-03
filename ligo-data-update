@@ -2,15 +2,17 @@
 
 pub_failed=1
 query_failed=1
+authz_location=$PWD/ligo_authz
+
 function finish_txn {
   if [ $pub_failed -eq 1 ]; then
     cvmfs_server abort -f
     exit 1
   elif [ $query_failed -eq 1 ]; then
-    cvmfs_server publish -F ligo_authz -X ligo.osgstorage.org
+    cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
     exit 2
   else
-    exec cvmfs_server publish -F ligo_authz -X ligo.osgstorage.org
+    exec cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
   fi
 }
 
@@ -45,5 +47,8 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
-PYTHONUNBUFFERED=1 ./cvmfs-sync -n 15 root://srm.unl.edu//user/ligo/frames/O1 /cvmfs/ligo.osgstorage.org/frames/O1
+cvmfs_sync_location=$PWD/cvmfs-sync
+pushd ~
+PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://srm.unl.edu//user/ligo/frames/O1 /cvmfs/ligo.osgstorage.org/frames/O1
+popd
 

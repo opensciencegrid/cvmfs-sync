@@ -193,8 +193,12 @@ def do_publish(info, dest):
         print "Output directory %s does not exist; skipping publish." % publish_dir
         return
     print "Walking directory %s." % publish_dir
+    idx = 1
     for root, dirs, files in os.walk(os.path.join(dest, "store")):
         for fname in files:
+            if idx % 10000 == 0:
+                print "Processed %d files." % idx
+            idx += 1
             if not fname.startswith(".cvmfsgraft-"):
                 continue
             real_fname = fname[len(".cvmfsgraft-"):]
@@ -225,7 +229,7 @@ def do_publish(info, dest):
                     if oe.errno != errno.ENOENT:
                         raise
             elif os.path.exists(cvmfs_pfn) and (os.stat(cvmfs_pfn).st_size == csum_size):
-                print "Ignoring graft for LFN %s as it already exists in CVMFS." % lfn
+                print "Ignoring graft for LFN %s as it already exists in CVMFS.  Deleting unnecessary graft file." % lfn
                 os.unlink(os.path.join(root, fname))
                 try:
                     os.unlink(os.path.join(root, real_fname))
@@ -240,7 +244,7 @@ def do_publish(info, dest):
                     if result:
                         raise Exception("Start of transaction for %s failed with %d" % (os.path.split(g_cvmfs)[-1], result))
                 lfn_dir = os.path.split(lfn)[0]
-                print "Publishing", lfn
+                #print "Publishing", lfn
                 try:
                     os.makedirs(g_cvmfs + lfn_dir)
                 except OSError, oe:
