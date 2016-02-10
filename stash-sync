@@ -44,6 +44,8 @@ def parse_opts():
                       help="Time threshold for starting new batches "
                            " of transfers.  Specified in minutes",
                       default = 0)
+    parser.add_option("-d", "--delete", dest="delete", action="store_true",
+                      help="Delete files from CVMFS if they are not present in Stash")
 
     opts, args = parser.parse_args()
     if len(args) < 2:
@@ -72,7 +74,14 @@ def create_read_callback(offset, readfp, writefd, filename, pid):
             os.close(writefd)
         else:
             inc_bytes(len(response))
-            os.write(writefd, response)
+            try:
+                os.write(writefd, response)
+            except OSError, oe:
+                if oe.errno != errno.EPIPE:
+                    raise
+                print "cvmfs_swissknife process unexpectedly died."
+                g_failed_files.append(filename)
+                return
             next_offset = offset + len(response)
             kwargs = {'offset': next_offset,
                       'size': 1024*1024,
@@ -191,6 +200,7 @@ def process_dir(base_url, directory):
     fs = XRootD.client.FileSystem(base_url)
     worklist = [directory]
     filelist = []
+    failed_list = []
     base_len = len(directory)
     while worklist:
         cwd = worklist.pop()
@@ -201,6 +211,7 @@ def process_dir(base_url, directory):
                                     flags=XRootD.client.flags.DirListFlags.STAT)
         if status.status:
             print "Failed to list directory:", cwd
+            failed_list.append("/" + cwd)
             continue
         for entry in dirlist.dirlist:
             if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
@@ -208,7 +219,60 @@ def process_dir(base_url, directory):
             else:
                 fname = cwd + "/" + entry.name
                 filelist.append((fname[base_len:], entry.statinfo.size))
-    return filelist
+    return filelist, failed_list
+
+
+def process_deletions(base_dir, orig_filelist, failed, dryrun):
+    slash_re = re.compile("/+")
+    filelist = []
+    for fname in orig_filelist:
+        try:
+            filelist.append(slash_re.subn("/", base_dir + "/" + fname[0])[0])
+        except TypeError:
+            print fname
+            raise
+    filelist = set(filelist)
+    dirlist = set([base_dir])
+    for fname in filelist:
+        dirname = os.path.split(fname)[0]
+        while dirname not in dirlist:
+            dirlist.add(dirname)
+            dirname = os.path.split(dirname)[0]
+    failed = set([slash_re.subn("/", i)[0] for i in failed])
+    count = 0
+    for dirpath, dirs, files in os.walk(base_dir):
+        dirpath = slash_re.sub("/", "/" + dirpath)
+        found_bad = False
+        for badpath in failed:
+            if dirpath.startswith(badpath):
+                found_bad = True
+                break
+        if found_bad:
+            continue
+        for fname in files:
+            if fname.startswith(".cvmfs"):
+                continue
+            full_fname = os.path.join(dirpath, fname)
+            if full_fname not in filelist:
+                count += 1
+                if dryrun:
+                    print "Would remove file %s." % full_fname
+                else:
+                    os.unlink(full_fname)
+        for dname in dirs:
+            full_dname = os.path.join(dirpath, dname)
+            if full_dname not in dirlist:
+                if dryrun:
+                    print "Would remove directory %s." % full_dname
+                else:
+                    # OverlayFS returns errant ENOTEMPTY on RHEL7.2
+                    try:
+                        os.rmdir(full_dname)
+                    except OSError, oe:
+                        if os.errno != errno.ENOTEMPTY:
+                            raise
+    if count and dryrun:
+        print "Would have removed %d files." % count
 
 
 def main():
@@ -219,18 +283,26 @@ def main():
     concurrency = opts.concurrency
     starttime = time.time()
 
+    full_filelist = []
+    full_failed_list = []
     for src in srcs:
         source_filelist = []
         src_parsed = urlparse.urlparse(src)
         base_url = src_parsed.scheme + "://" + src_parsed.netloc
         directory = src_parsed.path
-        filelist = process_dir(base_url, directory)
+        filelist, failed_list = process_dir(base_url, directory)
+        full_filelist += filelist
+        full_failed_list += failed_list
         print "Found %d files to process" % len(filelist)
         process_files(filelist, src, dest, concurrency, opts.max_time)
 
     processing_time = time.time() - starttime
     print "Total of %d bytes processed in %.2f seconds." % (g_bytes_xfer, processing_time)
     print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
+
+    dryrun = False
+    if opts.delete or dryrun:
+        process_deletions(dest, full_filelist, full_failed_list, dryrun)
 
     if not opts.failed:
         if g_failed_files:
