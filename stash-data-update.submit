@@ -3,7 +3,7 @@ universe = local
 
 environment = XRD_LOGLEVEL=Debug PYTHONUNBUFFERED=1
 executable = stash-data-update
-use_x509userproxy = true
+#use_x509userproxy = true
 output = stash_update_logs/lastrun.out
 error = stash_update_logs/lastrun.err
 log = stash_update_logs/log
@@ -15,6 +15,14 @@ cron_hour = *
 cron_minute = 2
 
 on_exit_remove = false
+
+job_max_vacate_time = 60
+when_to_transfer_output = ON_EXIT_OR_EVICT
+periodic_release = true
+periodic_hold = (JobStatus =?= 2) && (time()-EnteredCurrentStatus>7100)
+periodic_hold_reason = "Job restarted because it was running for almost 2 hours."
+periodic_hold_subcode = 2
+
 
 queue
 
