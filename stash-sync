@@ -24,6 +24,7 @@ g_bytes_xfer_lock = threading.Lock()
 
 g_starttime = time.time()
 
+signal.alarm(6600)
 
 def inc_bytes(count):
     global g_bytes_xfer
@@ -206,6 +207,9 @@ def process_dir(base_url, directory):
         cwd = worklist.pop()
         if user_dir_regexp.match(cwd):
             cwd += "/public"
+        # Upstream server has issues with these directories.
+        if cwd.startswith('//user//ndh8') or cwd.startswith('//user//vpentchev/public/tutorial-R/result'):
+            continue
         print "Processing", cwd
         status, dirlist = fs.dirlist("/" + cwd,
                                     flags=XRootD.client.flags.DirListFlags.STAT)

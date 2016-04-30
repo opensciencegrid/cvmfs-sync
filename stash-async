@@ -1,0 +1,316 @@
+#!/usr/bin/python
+
+"""
+Rewritten version of stash-sync.  Features:
+- Directory processing utilizes generators.  This way,
+  we can start processing files while we crawl directories.
+- Avoid use of asynchronous callbacks, which have a tendency to
+  deadlock.  Python subprocesses are used instead.
+"""
+
+import os
+import re
+import sys
+import time
+import errno
+import random
+import signal
+import optparse
+import urlparse
+import threading
+import traceback
+import multiprocessing
+
+oldpath = sys.path
+sys.path = sys.path[1:]
+
+import XRootD.client
+
+sys.path = oldpath
+
+g_processed_files = []
+g_bytes_xfer = 0
+g_bytes_xfer_lock = threading.Lock()
+
+g_starttime = time.time()
+
+def parse_opts():
+    parser = optparse.OptionParser(usage="%prog [options] src1 [src2 ...] dest")
+    parser.add_option("-n", "--concurrency", dest="concurrency",
+                       help="Number of helper processes", default=4,
+                       type="int")
+    parser.add_option("-f", "--failed", dest="failed",
+                      help="Output filename for list of failed files")
+    parser.add_option("-t", "--max-time", dest="max_time", type="int",
+                      help="Time threshold for starting new batches "
+                           " of transfers.  Specified in minutes",
+                      default = 0)
+    parser.add_option("-d", "--delete", dest="delete", action="store_true",
+                      help="Delete files from CVMFS if they are not present in Stash")
+
+    opts, args = parser.parse_args()
+    if len(args) < 2:
+        print >> sys.stderr, "Need at least one source and destination"
+        parser.print_usage()
+        sys.exit(1)
+
+    return opts, args
+
+
+def kickoff_graft(fp, input_url, output_filename, deadline):
+
+    if (deadline > 0) and (time.time() > deadline):
+        return
+
+    readfp, writefp = os.pipe()
+    pid = os.fork()
+    if not pid:
+        try:
+            os.dup2(readfp, 0)
+            os.close(writefp)
+            args = ['cvmfs_swissknife', 'graft', '-i', '-', '-o', output_filename, '-Z', 'none']
+            os.execvp("cvmfs_swissknife", args)
+        finally:
+            print "Failed to exec cvmfs_swissknife for processing", input_url
+            os._exit(1)
+    os.close(readfp)
+    next_offset = 0
+    while True:
+        if (deadline > 0) and (time.time() > deadline):
+            print "Timed out when transferring", input_url
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            return False
+
+        status, response = fp.read(offset=next_offset, size=1024*1024)
+        if status.status:
+            print "Failed to create read request for", input_url
+            print "Status:", status
+            print "Killing graft PID", pid
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            return False
+        # Empty response indicates EOF.
+        if (response == None) or (len(response) == 0):
+            print "Finished processing", input_url 
+            os.close(writefp)
+            os.waitpid(pid, 0)
+            break
+        else:
+            try:
+                os.write(writefp, response)
+            except OSError, oe:
+                if oe.errno != errno.EPIPE:
+                    raise
+                print "cvmfs_swissknife process unexpectedly died."
+                return False
+            next_offset += len(response)
+
+    return True
+
+
+def process_single_file(filename, size, base_url, output_dir, deadline):
+    if (deadline > 0) and (time.time() > deadline):
+        return
+
+    current = 0
+
+    # Serialize on opening files
+    input_url = base_url + filename
+    output_filename = output_dir + filename
+    if os.path.exists(output_filename):
+        st = os.stat(output_filename)
+        if size == st.st_size:
+            #print "Skipping file %s as %s already exists." % \
+            #    (input_url, output_filename)
+            return
+        else:
+            print "Size mismatch!  Regenerating file %s (size %d) -> %s (size %d)" % \
+                    (input_url, size, output_filename, st.st_size)
+            os.unlink(output_filename)
+    try:
+        os.makedirs(os.path.split(output_filename)[0])
+    except OSError, oe:
+        if oe.errno != errno.EEXIST:
+            raise
+    fp = XRootD.client.File()
+
+    status = fp.open(input_url)[0]
+    if status.status:
+        print "Failed to open file %s:" % input_url, status
+        return filename
+
+    input_url = base_url + filename
+    output_filename = output_dir + filename
+    if not kickoff_graft(fp, input_url, output_filename, deadline):
+        return filename
+
+
+user_dir_regexp = re.compile(r'^/+user/+([A-Za-z0-9.]+)/*$')
+def process_dir(base_url, directory):
+    fs = XRootD.client.FileSystem(base_url)
+    worklist = [directory]
+    base_len = len(directory)
+    while worklist:
+        cwd = worklist.pop()
+        if user_dir_regexp.match(cwd):
+            cwd += "/public"
+        # Upstream server has issues with these directories.
+        if cwd.startswith('//user//yadunand') or cwd.startswith('//user//ndh8') or cwd.startswith('//user//vpentchev/public/tutorial-R/result'):
+            continue
+        print "Processing", cwd
+        status, dirlist = fs.dirlist("/" + cwd,
+                                    flags=XRootD.client.flags.DirListFlags.STAT)
+        if status.status:
+            print "Failed to list directory:", cwd
+            yield '/' + cwd, -1, True
+            continue
+        # Shuffle processing result - reduces the likelihood we get "stuck" in one directory.
+        random_dirlist = list(dirlist.dirlist)
+        random.shuffle(random_dirlist)
+        for entry in random_dirlist:
+            if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
+                # Breadth-first-search: as close as we get to fairsharing between user dirs.
+                worklist.insert(0, cwd + "/" + entry.name)
+            else:
+                fname = cwd + "/" + entry.name
+                yield fname[base_len:], entry.statinfo.size, False
+
+
+def process_deletions(base_dir, orig_filelist, failed, dryrun):
+    slash_re = re.compile("/+")
+    filelist = []
+    for fname in orig_filelist:
+        try:
+            filelist.append(slash_re.subn("/", base_dir + "/" + fname[0])[0])
+        except TypeError:
+            print fname
+            raise
+    filelist = set(filelist)
+    dirlist = set([base_dir])
+    for fname in filelist:
+        dirname = os.path.split(fname)[0]
+        while dirname not in dirlist:
+            dirlist.add(dirname)
+            dirname = os.path.split(dirname)[0]
+    failed = set([slash_re.subn("/", i)[0] for i in failed])
+    count = 0
+    for dirpath, dirs, files in os.walk(base_dir):
+        dirpath = slash_re.sub("/", "/" + dirpath)
+        found_bad = False
+        for badpath in failed:
+            if dirpath.startswith(badpath):
+                found_bad = True
+                break
+        if found_bad:
+            continue
+        for fname in files:
+            if fname.startswith(".cvmfs"):
+                continue
+            full_fname = os.path.join(dirpath, fname)
+            if full_fname not in filelist:
+                count += 1
+                if dryrun:
+                    print "Would remove file %s." % full_fname
+                else:
+                    os.unlink(full_fname)
+        for dname in dirs:
+            full_dname = os.path.join(dirpath, dname)
+            if full_dname not in dirlist:
+                if dryrun:
+                    print "Would remove directory %s." % full_dname
+                else:
+                    # OverlayFS returns errant ENOTEMPTY on RHEL7.2
+                    try:
+                        os.rmdir(full_dname)
+                    except OSError, oe:
+                        if os.errno != errno.ENOTEMPTY:
+                            raise
+    if count and dryrun:
+        print "Would have removed %d files." % count
+
+
+def main():
+    opts, args = parse_opts()
+    dest = args[-1]
+    srcs = args[:-1]
+    print "Inputs to process:", ",".join(srcs)
+    concurrency = opts.concurrency
+    starttime = time.time()
+    if opts.max_time > 0:
+        deadline = opts.max_time*60 + starttime
+    else:
+        deadline = starttime + 86400*7
+
+    pool = multiprocessing.Pool(processes=concurrency)
+
+    full_filelist = []
+    full_failed_list = []
+    futures = []
+    for src in srcs:
+        if time.time() > deadline:
+            break
+        src_parsed = urlparse.urlparse(src)
+        base_url = src_parsed.scheme + "://" + src_parsed.netloc
+        directory = src_parsed.path
+        for filename, size, failed in process_dir(base_url, directory):
+            if time.time() > deadline:
+                break
+            if failed:
+                full_failed_list.append(filename)
+            else:
+                full_filelist.append(filename)
+                future = pool.apply_async(process_single_file, (filename, size, src, dest, deadline))
+                futures.append(future)
+
+            if len(futures) >= 1000:
+                print "More than 1k files pending; draining queue."
+                drain_deadline = time.time() + 30
+                new_futures = []
+                for future in futures:
+                    remaining = drain_deadline - time.time()
+                    if remaining > 0:
+                        future.wait(remaining)
+                    if future.ready():
+                        try:
+                            result = future.get()
+                            if result:
+                                full_failed_list.append(result)
+                        except:
+                            traceback.print_exc()
+                    else:
+                        new_futures.append(future)
+                futures = new_futures
+        print "Found %d files to process" % len(full_filelist)
+
+    pool.join()
+
+    processing_time = time.time() - starttime
+    print "Total of %d bytes processed in %.2f seconds." % (g_bytes_xfer, processing_time)
+    print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
+
+    dryrun = True
+    if opts.delete or dryrun:
+        process_deletions(dest, full_filelist, full_failed_list, dryrun)
+
+    if not opts.failed:
+        if full_failed_list:
+            print "Failed files:"
+            for fname in full_failed_list:
+                print fanem
+    else:
+        fh = open(opts.failed, "w")
+        fh.write("\n".join(g_failed_files))
+    if not g_failed_files:
+        print "Synchronization completed successfully!"
+        return 0
+    else:
+        print "There were %d synchronization failures." % len(g_failed_files)
+        # TODO: cleanup partial grafts
+        return 1
+
+
+if __name__ == '__main__':
+    sys.exit(main())
+
+

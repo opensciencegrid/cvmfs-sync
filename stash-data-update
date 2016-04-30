@@ -24,8 +24,11 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
-cvmfs_sync_location=$PWD/stash-sync
+cvmfs_sync_location=$PWD/stash-async
+#cvmfs_sync_location=$PWD/stash-sync
+date
 pushd ~
-PYTHONUNBUFFERED=1 $cvmfs_sync_location --delete -n 15 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location --delete -n 15 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user
+PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 --max-time 110 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user
 popd
 
