@@ -1,0 +1,18 @@
+
+[Unit]
+Description=stash.osgstorage.org repo update
+After=network.target cvmfs-ligo.osgstorage.org.mount
+Wants=network.target cvmfs-ligo.osgstorage.org.mount
+
+[Service]
+ExecStart=/home/cse496/bbockelm/cvmfs-sync/ligo-data-update
+WorkingDirectory=/home/cse496/bbockelm/cvmfs-sync
+RestartSec=15min
+Restart=always
+User=bbockelm
+Nice=19
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+

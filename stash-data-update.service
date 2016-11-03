@@ -1,0 +1,18 @@
+
+[Unit]
+Description=stash.osgstorage.org repo update
+After=network.target cvmfs-stash.osgstorage.org.mount
+Wants=network.target cvmfs-stash.osgstorage.org.mount
+
+[Service]
+ExecStart=/home/cse496/bbockelm/cvmfs-sync/stash-data-update
+WorkingDirectory=/home/cse496/bbockelm/cvmfs-sync
+RestartSec=15min
+Restart=always
+User=bbockelm
+Nice=19
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+
