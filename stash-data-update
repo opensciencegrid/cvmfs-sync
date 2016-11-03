@@ -27,8 +27,10 @@ pub_failed=0
 cvmfs_sync_location=$PWD/stash-async
 #cvmfs_sync_location=$PWD/stash-sync
 date
+touch /cvmfs/stash.osgstorage.org/user/bbockelm
 pushd ~
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location --delete -n 15 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user
-PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 --max-time 110 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location --delete -n 50 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location --delete -n 50 --max-time 174 root://data.ci-connect.net//user/ /cvmfs/stash.osgstorage.org/user/
+PYTHONUNBUFFERED=1 $cvmfs_sync_location --delete -n 50 --max-time 174 root://stash.osgconnect.net//user/ /cvmfs/stash.osgstorage.org/user/
 popd
 

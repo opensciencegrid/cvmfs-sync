@@ -39,6 +39,9 @@ else
   echo "Failed to update LIGO user list but proceeding with update."
 fi
 
+# Periodically, we'll get a "ligo.osgstorage.org is not based on the newest published revision";
+# this seems to clear it up.
+cvmfs_server abort -f ligo.osgstorage.org
 set -e
 cvmfs_server transaction ligo.osgstorage.org
 set +e
@@ -49,6 +52,6 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 pub_failed=0
 cvmfs_sync_location=$PWD/cvmfs-sync
 pushd ~
-PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://srm.unl.edu//user/ligo/frames/ /cvmfs/ligo.osgstorage.org/frames/
+PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ /cvmfs/ligo.osgstorage.org/frames/
 popd
 

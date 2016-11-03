@@ -34,7 +34,7 @@ def main():
     if args:
         dir, fname = os.path.split(args[0])
         fd, name = tempfile.mkstemp(prefix=fname, dir=dir)
-        os.write(fd, "\n".join(all_dns) + "\n")
+        os.write(fd, "x509%\n" + "\n".join(all_dns) + "\n")
         os.close(fd)
         os.rename(name, args[0])
     else:

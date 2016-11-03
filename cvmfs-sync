@@ -184,7 +184,9 @@ def process_dir(base_url, directory):
         status, dirlist = fs.dirlist("/" + cwd,
                                     flags=XRootD.client.flags.DirListFlags.STAT)
         if status.status:
-            raise Exception("Failed to list directory")
+            print "Failed to list directory", cwd, "skipping"
+            print status
+            continue
         for entry in dirlist.dirlist:
             if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
                 worklist.append(cwd + "/" + entry.name)

@@ -13,6 +13,7 @@ import re
 import sys
 import time
 import errno
+import Queue
 import random
 import signal
 import optparse
@@ -37,7 +38,7 @@ g_starttime = time.time()
 def parse_opts():
     parser = optparse.OptionParser(usage="%prog [options] src1 [src2 ...] dest")
     parser.add_option("-n", "--concurrency", dest="concurrency",
-                       help="Number of helper processes", default=4,
+                       help="Number of helper processes", default=1,
                        type="int")
     parser.add_option("-f", "--failed", dest="failed",
                       help="Output filename for list of failed files")
@@ -62,6 +63,7 @@ def kickoff_graft(fp, input_url, output_filename, deadline):
     if (deadline > 0) and (time.time() > deadline):
         return
 
+    print "Grafting", input_url, "to", output_filename
     readfp, writefp = os.pipe()
     pid = os.fork()
     if not pid:
@@ -117,7 +119,7 @@ def process_single_file(filename, size, base_url, output_dir, deadline):
 
     # Serialize on opening files
     input_url = base_url + filename
-    output_filename = output_dir + filename
+    output_filename = output_dir + '/' + filename
     if os.path.exists(output_filename):
         st = os.stat(output_filename)
         if size == st.st_size:
@@ -141,26 +143,64 @@ def process_single_file(filename, size, base_url, output_dir, deadline):
         return filename
 
     input_url = base_url + filename
-    output_filename = output_dir + filename
+    output_filename = output_dir + '/' + filename
     if not kickoff_graft(fp, input_url, output_filename, deadline):
         return filename
 
 
+def list_dir(work_queue, results_queue, fs):
+
+    while True:
+        cwd = work_queue.get()
+        print "Begin dirlist of", cwd
+        status = None
+        dirlist = None
+        try:
+            status, dirlist = fs.dirlist(cwd,
+                                        flags=XRootD.client.flags.DirListFlags.STAT)
+        finally:
+            results_queue.put((status, dirlist, cwd), True)
+            work_queue.task_done()
+
+
 user_dir_regexp = re.compile(r'^/+user/+([A-Za-z0-9.]+)/*$')
-def process_dir(base_url, directory):
+def process_dir(base_url, directory, thread_count):
     fs = XRootD.client.FileSystem(base_url)
     worklist = [directory]
     base_len = len(directory)
-    while worklist:
-        cwd = worklist.pop()
-        if user_dir_regexp.match(cwd):
-            cwd += "/public"
-        # Upstream server has issues with these directories.
-        if cwd.startswith('//user//yadunand') or cwd.startswith('//user//ndh8') or cwd.startswith('//user//vpentchev/public/tutorial-R/result'):
+
+    work_queue = Queue.Queue(maxsize=thread_count)
+    work_sent = 0
+    results_queue = Queue.Queue() # shouldn't block
+    results_received = 0
+    for count in range(thread_count):
+        t = threading.Thread(target=list_dir, args=(work_queue, results_queue, fs), name="Directory list worker %d" % count)
+        t.setDaemon(True)
+        t.start()
+
+    while worklist or (work_sent != results_received):
+
+        while worklist and not work_queue.full():
+            cwd = worklist.pop()
+            slash_re = re.compile("/+")
+            cwd = slash_re.subn("/", cwd)[0]
+            if user_dir_regexp.match(cwd):
+                cwd += "/public"
+            # Upstream server has issues with these directories.
+            if cwd.startswith('/user/yadunand') or cwd.startswith('/user/ndh8') or cwd.startswith('/user/vpentchev/public/tutorial-R/result'):
+                yield '/' + cwd, -1, True
+                continue
+            work_sent += 1
+            work_queue.put("/" + cwd, True)
+
+        status, dirlist, cwd = results_queue.get(True)
+        print "Processing entries of", cwd
+        results_queue.task_done()
+        results_received += 1
+        if (status is None) and (dirlist is None):
+            print "Failure when processing dir:", cwd
+            yield '/' + cwd, -1, True
             continue
-        print "Processing", cwd
-        status, dirlist = fs.dirlist("/" + cwd,
-                                    flags=XRootD.client.flags.DirListFlags.STAT)
         if status.status:
             print "Failed to list directory:", cwd
             yield '/' + cwd, -1, True
@@ -182,7 +222,7 @@ def process_deletions(base_dir, orig_filelist, failed, dryrun):
     filelist = []
     for fname in orig_filelist:
         try:
-            filelist.append(slash_re.subn("/", base_dir + "/" + fname[0])[0])
+            filelist.append(slash_re.subn("/", base_dir + "/" + fname)[0])
         except TypeError:
             print fname
             raise
@@ -230,6 +270,28 @@ def process_deletions(base_dir, orig_filelist, failed, dryrun):
         print "Would have removed %d files." % count
 
 
+def scan_futures(futures, full_failed_list, maxwait):
+    random.shuffle(futures)
+    drain_deadline = time.time() + maxwait
+    new_futures = []
+    # First, iterate through immediately-finished ones.
+    for future in futures:
+        if maxwait > 0:
+            remaining = drain_deadline - time.time()
+            if remaining > 0:
+                future.wait(remaining)
+        if future.ready():
+            try:
+                result = future.get()
+                if result:
+                    full_failed_list.append(result)
+            except:
+                traceback.print_exc()
+        else:
+            new_futures.append(future)
+    return new_futures, full_failed_list
+
+
 def main():
     opts, args = parse_opts()
     dest = args[-1]
@@ -242,6 +304,8 @@ def main():
     else:
         deadline = starttime + 86400*7
 
+    thread_count = 5
+
     pool = multiprocessing.Pool(processes=concurrency)
 
     full_filelist = []
@@ -253,7 +317,7 @@ def main():
         src_parsed = urlparse.urlparse(src)
         base_url = src_parsed.scheme + "://" + src_parsed.netloc
         directory = src_parsed.path
-        for filename, size, failed in process_dir(base_url, directory):
+        for filename, size, failed in process_dir(base_url, directory, thread_count):
             if time.time() > deadline:
                 break
             if failed:
@@ -263,49 +327,41 @@ def main():
                 future = pool.apply_async(process_single_file, (filename, size, src, dest, deadline))
                 futures.append(future)
 
-            if len(futures) >= 1000:
-                print "More than 1k files pending; draining queue."
-                drain_deadline = time.time() + 30
-                new_futures = []
-                for future in futures:
-                    remaining = drain_deadline - time.time()
-                    if remaining > 0:
-                        future.wait(remaining)
-                    if future.ready():
-                        try:
-                            result = future.get()
-                            if result:
-                                full_failed_list.append(result)
-                        except:
-                            traceback.print_exc()
-                    else:
-                        new_futures.append(future)
-                futures = new_futures
+            count = 0
+            while len(futures) >= 1000:
+                futures, full_failed_list = scan_futures(futures, full_failed_list, 0)
+                sleep_time = min(5, .1 * 2**count)
+                count += 1
+                time.sleep(count)
         print "Found %d files to process" % len(full_filelist)
 
+    pool.close()
     pool.join()
 
     processing_time = time.time() - starttime
     print "Total of %d bytes processed in %.2f seconds." % (g_bytes_xfer, processing_time)
     print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
 
-    dryrun = True
+    dryrun = False
     if opts.delete or dryrun:
-        process_deletions(dest, full_filelist, full_failed_list, dryrun)
+        if deadline - 30 < time.time():
+            print "Not processing deletions because we didn't have a full run"
+        else:
+            process_deletions(dest, full_filelist, full_failed_list, dryrun)
 
     if not opts.failed:
         if full_failed_list:
             print "Failed files:"
             for fname in full_failed_list:
-                print fanem
+                print fname
     else:
         fh = open(opts.failed, "w")
-        fh.write("\n".join(g_failed_files))
-    if not g_failed_files:
+        fh.write("\n".join(full_failed_list))
+    if not full_failed_list:
         print "Synchronization completed successfully!"
         return 0
     else:
-        print "There were %d synchronization failures." % len(g_failed_files)
+        print "There were %d synchronization failures." % len(full_failed_list)
         # TODO: cleanup partial grafts
         return 1
 
