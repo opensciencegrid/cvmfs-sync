@@ -5,6 +5,7 @@ import sys
 import time
 import errno
 import signal
+import fnmatch
 import optparse
 import urlparse
 import threading
@@ -37,6 +38,8 @@ def parse_opts():
                        type="int")
     parser.add_option("-f", "--failed", dest="failed",
                       help="Output filename for list of failed files")
+    parser.add_option("-i", "--ignore", dest="ignore",
+                      help="Unix glob of filenames to ignore.")
 
     opts, args = parser.parse_args()
     if len(args) < 2:
@@ -173,7 +176,7 @@ def process_files_impl(filenames, base_url, output_dir, count):
         time.sleep(1)
 
 
-def process_dir(base_url, directory):
+def process_dir(base_url, directory, ignore=None):
     fs = XRootD.client.FileSystem(base_url)
     worklist = [directory]
     filelist = []
@@ -190,7 +193,7 @@ def process_dir(base_url, directory):
         for entry in dirlist.dirlist:
             if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
                 worklist.append(cwd + "/" + entry.name)
-            else:
+            elif not ignore or not fnmatch.fnmatch(entry.name, ignore):
                 fname = cwd + "/" + entry.name
                 filelist.append((fname[base_len:], entry.statinfo.size))
     return filelist
@@ -209,7 +212,7 @@ def main():
         src_parsed = urlparse.urlparse(src)
         base_url = src_parsed.scheme + "://" + src_parsed.netloc
         directory = src_parsed.path
-        filelist = process_dir(base_url, directory)
+        filelist = process_dir(base_url, directory, ignore=opts.ignore)
         print "Found %d files to process" % len(filelist)
         process_files(filelist, src, dest, concurrency)
 
