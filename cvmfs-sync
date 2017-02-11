@@ -22,6 +22,7 @@ g_processed_files = []
 g_bytes_xfer = 0
 g_bytes_xfer_lock = threading.Lock()
 
+signal.alarm(4*3600)
 
 def inc_bytes(count):
     global g_bytes_xfer
@@ -193,9 +194,18 @@ def process_dir(base_url, directory, ignore=None):
         for entry in dirlist.dirlist:
             if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
                 worklist.append(cwd + "/" + entry.name)
-            elif not ignore or not fnmatch.fnmatch(entry.name, ignore):
+            elif not ignore:
                 fname = cwd + "/" + entry.name
                 filelist.append((fname[base_len:], entry.statinfo.size))
+            else:
+                should_ignore = False
+                for ignore_rule in ignore.split(","):
+                     if fnmatch.fnmatch(entry.name, ignore_rule):
+                         should_ignore = True
+                         break
+                if not should_ignore:
+                    fname = cwd + "/" + entry.name
+                    filelist.append((fname[base_len:], entry.statinfo.size))
     return filelist
 
 
