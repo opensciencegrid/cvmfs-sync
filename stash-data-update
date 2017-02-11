@@ -13,6 +13,10 @@ function finish_txn {
 
 echo "Starting Stash public data update at `date`"
 
+# Periodically, we'll get a "ligo.osgstorage.org is not based on the newest published revision";
+# this seems to clear it up.
+echo "Aborting any old transaction."
+cvmfs_server abort -f stash.osgstorage.org
 cvmfs_server transaction stash.osgstorage.org
 if [ $? -ne 0 ]; then
   echo "Failed to start transaction."
