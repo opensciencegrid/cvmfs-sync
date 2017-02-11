@@ -18,13 +18,15 @@ function finish_txn {
 
 echo "Starting LIGO frame data update at `date`"
 
+voms-proxy-init -rfc -valid 168:00
 if `voms-proxy-info --exists --valid 1:0`; then
   voms-proxy-info -all
   echo "Valid proxy!"
   # Proxy is valid but VOMS extension is about to expire.
   if [ `voms-proxy-info -actimeleft` -lt 3600 ]; then
     echo "Generating new VOMS extensions."
-    voms-proxy-init -voms osg:/osg/ligo -rfc -valid 168:00 -noregen
+    #voms-proxy-init -voms osg:/osg/ligo -rfc -valid 168:00 -noregen
+    voms-proxy-init -rfc -valid 168:00
   fi
 else
   echo "Proxy has expired."
@@ -41,7 +43,9 @@ fi
 
 # Periodically, we'll get a "ligo.osgstorage.org is not based on the newest published revision";
 # this seems to clear it up.
+echo "Aborting any old transaction."
 cvmfs_server abort -f ligo.osgstorage.org
+echo "Starting new transaction."
 set -e
 cvmfs_server transaction ligo.osgstorage.org
 set +e
@@ -52,6 +56,11 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 pub_failed=0
 cvmfs_sync_location=$PWD/cvmfs-sync
 pushd ~
-PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ /cvmfs/ligo.osgstorage.org/frames/
+PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER10 /cvmfs/ligo.osgstorage.org/frames/ER10 --ignore '*.tmp'
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER8 /cvmfs/ligo.osgstorage.org/frames/ER8 --ignore '*.tmp'
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O1 /cvmfs/ligo.osgstorage.org/frames/O1 --ignore '*.tmp'
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/postO1 /cvmfs/ligo.osgstorage.org/frames/postO1 --ignore '*.tmp'
+#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/S6 /cvmfs/ligo.osgstorage.org/frames/S6 --ignore '*.tmp'
 popd
 
