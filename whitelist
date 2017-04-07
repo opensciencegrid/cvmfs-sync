@@ -1,3 +1,7 @@
 osg:/osg/ligo
 LIGO:/ligo
 /DC=org/DC=cilogon/C=US/O=Fermi National Accelerator Laboratory/OU=People/CN=Dave Dykstra/CN=UID:dwd
+/DC=org/DC=opensciencegrid/O=Open Science Grid/OU=Services/CN=cvmfs/datafind.ligo.uwm.edu
+/DC=org/DC=opensciencegrid/O=Open Science Grid/OU=Services/CN=diskcache/sugwg-test1.phy.syr.edu
+/DC=org/DC=opensciencegrid/O=Open Science Grid/OU=Services/CN=diskcache/sugwg-osg.phy.syr.edu
+/DC=org/DC=opensciencegrid/O=Open Science Grid/OU=Services/CN=diskcache/sugwg-condor.phy.syr.edu
