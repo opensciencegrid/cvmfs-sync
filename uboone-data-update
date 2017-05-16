@@ -1,0 +1,33 @@
+#!/bin/sh
+
+pub_failed=1
+
+function finish_txn {
+  if [ $pub_failed -eq 1 ]; then
+    cvmfs_server abort -f
+    exit 1
+  else
+    exec cvmfs_server publish -X uboone.osgstorage.org
+  fi
+}
+
+echo "Starting uboone public data update at `date`"
+
+# Periodically, we'll get a "uboone.osgstorage.org is not based on the newest published revision";
+# this seems to clear it up.
+cvmfs_server abort -f uboone.osgstorage.org
+set -e
+cvmfs_server transaction uboone.osgstorage.org
+set +e
+
+trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
+
+# For now, publish even on failure - we want to publish partial progress.
+# May revisit later.
+pub_failed=0
+cvmfs_sync_location=$PWD/cvmfs-sync
+date
+pushd ~
+touch /cvmfs/uboone.osgstorage.org/pnfs
+PYTHONUNBUFFERED=1 $cvmfs_sync_location root://fndca1.fnal.gov:1095/pnfs/fnal.gov/usr/uboone/persistent/stash /cvmfs/uboone.osgstorage.org/pnfs/fnal.gov/usr/uboone/persistent/stash
+popd
