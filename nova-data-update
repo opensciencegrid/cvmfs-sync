@@ -1,4 +1,6 @@
-led=1
+#!/bin/sh
+
+pub_failed=1
 
 function finish_txn {
   if [ $pub_failed -eq 1 ]; then
