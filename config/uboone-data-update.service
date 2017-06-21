@@ -1,0 +1,16 @@
+[Unit]
+Description=uboone.osgstorage.org repo update
+After=network.target cvmfs-uboone.osgstorage.org.mount
+Wants=network.target cvmfs-uboone.osgstorage.org.mount
+
+[Service]
+ExecStart=/home/swanson/dweitzel/uboone-data-update
+WorkingDirectory=/home/swanson/dweitzel
+RestartSec=15min
+Restart=always
+User=dweitzel
+Nice=19
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

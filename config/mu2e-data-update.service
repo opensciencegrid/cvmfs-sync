@@ -1,0 +1,18 @@
+
+[Unit]
+Description=mu2e.osgstorage.org repo update
+After=network.target cvmfs-mu2e.osgstorage.org.mount
+Wants=network.target cvmfs-mu2e.osgstorage.org.mount
+
+[Service]
+ExecStart=/home/swanson/dweitzel/mu2e-data-update
+WorkingDirectory=/home/swanson/dweitzel
+RestartSec=15min
+Restart=always
+User=dweitzel
+Nice=19
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+

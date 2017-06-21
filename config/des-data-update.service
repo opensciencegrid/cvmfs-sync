@@ -1,0 +1,17 @@
+
+[Unit]
+Description=des.osgstorage.org repo update
+After=network.target cvmfs-des.osgstorage.org.mount
+Wants=network.target cvmfs-des.osgstorage.org.mount
+
+[Service]
+ExecStart=/home/swanson/dweitzel/des-data-update
+WorkingDirectory=/home/swanson/dweitzel
+RestartSec=15min
+Restart=always
+User=dweitzel
+Nice=19
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
