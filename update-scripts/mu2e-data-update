@@ -25,9 +25,8 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
-cvmfs_sync_location=$PWD/cvmfs-sync
 date
 pushd ~
 touch /cvmfs/mu2e.osgstorage.org/pnfs
-PYTHONUNBUFFERED=1 $cvmfs_sync_location root://fndca1.fnal.gov:1095/pnfs/fnal.gov/usr/mu2e/persistent/stash /cvmfs/mu2e.osgstorage.org/pnfs/fnal.gov/usr/mu2e/persistent/stash
+PYTHONUNBUFFERED=1 cvmfs-sync root://fndca1.fnal.gov:1095/pnfs/fnal.gov/usr/mu2e/persistent/stash /cvmfs/mu2e.osgstorage.org/pnfs/fnal.gov/usr/mu2e/persistent/stash
 popd
