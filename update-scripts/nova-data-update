@@ -28,7 +28,7 @@ pub_failed=0
 date
 pushd ~
 touch /cvmfs/nova.osgstorage.org/pnfs
-PYTHONUNBUFFERED=1 cvmfs-sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/data/flux/ /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/data/flux/
-PYTHONUNBUFFERED=1 cvmfs-sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/persistent/analysis /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/persistent/analysis
+PYTHONUNBUFFERED=1 cvmfs_sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/data/flux/ /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/data/flux/
+PYTHONUNBUFFERED=1 cvmfs_sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/persistent/analysis /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/persistent/analysis
 popd
 

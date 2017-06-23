@@ -54,9 +54,8 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
-cvmfs_sync_location=$PWD/cvmfs-sync
 pushd ~
-PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
+PYTHONUNBUFFERED=1 cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
 #PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER10 /cvmfs/ligo.osgstorage.org/frames/ER10 --ignore '*.tmp'
 #PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER8 /cvmfs/ligo.osgstorage.org/frames/ER8 --ignore '*.tmp'
 #PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O1 /cvmfs/ligo.osgstorage.org/frames/O1 --ignore '*.tmp'

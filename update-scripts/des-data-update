@@ -28,5 +28,5 @@ pub_failed=0
 date
 pushd ~
 touch /cvmfs/des.osgstorage.org/pnfs
-PYTHONUNBUFFERED=1 cvmfs-sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/des/persistent/stash /cvmfs/des.osgstorage.org/pnfs/fnal.gov/usr/des/persistent/stash
+PYTHONUNBUFFERED=1 cvmfs_sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/des/persistent/stash /cvmfs/des.osgstorage.org/pnfs/fnal.gov/usr/des/persistent/stash
 popd
