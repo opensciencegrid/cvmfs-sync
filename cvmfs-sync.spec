@@ -27,8 +27,8 @@ BuildArch: 	noarch
 rm -rf $RPM_BUILD_ROOT
 
 install -d $RPM_BUILD_ROOT/%{_bindir}
-install -m 0755 bin/stash-async $RPM_BUILD_ROOT/%{_bindir}/stash-async
-install -m 0755 bin/cvmfs-sync $RPM_BUILD_ROOT/%{_bindir}/cvmfs-sync
+install -m 0755 bin/stash_async $RPM_BUILD_ROOT/%{_bindir}/stash_async
+install -m 0755 bin/cvmfs_sync $RPM_BUILD_ROOT/%{_bindir}/cvmfs_sync
 
 # Install update scripts
 install -d $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync
