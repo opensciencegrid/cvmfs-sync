@@ -53,7 +53,7 @@ exit 0
 %files
 %{_libexecdir}/cvmfs-sync
 %{_bindir}/*
-%dir %attr(0555, cvmfs-sync, cvmfs-sync) %{_datarootdir}/cvmfs-sync
+%dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_datarootdir}/cvmfs-sync
 %{_unitdir}/*
 
 
