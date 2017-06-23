@@ -4,11 +4,11 @@ After=network.target cvmfs-nova.osgstorage.org.mount
 Wants=network.target cvmfs-nova.osgstorage.org.mount
 
 [Service]
-ExecStart=/home/swanson/dweitzel/nova-data-update
-WorkingDirectory=/home/swanson/dweitzel
+ExecStart=/usr/libexec/cvmfs-sync/nova-data-update
+WorkingDirectory=/usr/share/cvmfs-sync
 RestartSec=15min
 Restart=always
-User=dweitzel
+User=cvmfs-sync
 Nice=19
 LimitNOFILE=65536
 

@@ -34,7 +34,7 @@ else
 fi
 
 # Generate a new authz list which we will use for publication
-if `./ligo-auth-gen ligo_authz -w whitelist`; then
+if `/usr/libexec/cvmfs-sync/ligo-auth-gen ligo_authz -w whitelist`; then
   echo "Successfully updated LIGO user list."
   query_failed=0
 else

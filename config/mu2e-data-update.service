@@ -5,11 +5,11 @@ After=network.target cvmfs-mu2e.osgstorage.org.mount
 Wants=network.target cvmfs-mu2e.osgstorage.org.mount
 
 [Service]
-ExecStart=/home/swanson/dweitzel/mu2e-data-update
-WorkingDirectory=/home/swanson/dweitzel
+ExecStart=/usr/libexec/cvmfs-sync/mu2e-data-update
+WorkingDirectory=/usr/share/cvmfs-sync
 RestartSec=15min
 Restart=always
-User=dweitzel
+User=cvmfs-sync
 Nice=19
 LimitNOFILE=65536
 
