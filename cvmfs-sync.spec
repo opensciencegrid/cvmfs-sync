@@ -4,12 +4,13 @@ Release:        1%{?dist}
 Summary:        CVMFS Sync
 
 License:        ASL 2.0
-URL:            
-Source0:        
+URL:            https://github.com/bbockelm/cvmfs-sync
+Source0:        cvmfs-sync-%{version}.tar.gz
 
-BuildRequires:  
-Requires:       
-Requires(pre): shadow-utils
+Requires:       cvmfs-server
+Requires(pre): 	shadow-utils
+
+BuildArch: 	noarch
 
 %description
 
@@ -19,8 +20,6 @@ Requires(pre): shadow-utils
 
 
 %build
-#%configure
-#make %{?_smp_mflags}
 
 
 %install
@@ -35,7 +34,11 @@ install -d $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync
 install -m 0755 update-scripts/* $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/
 
 install -d $RPM_BUILD_ROOT/%{_datarootdir}/cvmfs-sync
-install -m 0755 ligo-auth-gen $RPM_BUILD_ROOT/%{_libexecdir}/ligo-auth-gen
+install -m 0755 ligo-auth-gen $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/ligo-auth-gen
+
+# Install the SystemD unit files
+install -d $RPM_BUILD_ROOT/%{_unitdir}
+install -m 0600 config/*.service $RPM_BUILD_ROOT/%{_unitdir}/
 
 %pre
 # Install the cvmfs-sync user
@@ -49,8 +52,8 @@ exit 0
 %files
 %{_libexecdir}/cvmfs-sync
 %{_bindir}/*
-%{_datarootdir}/cvmfs-sync
-
+%dir %attr(0555, cvmfs-sync, cvmfs-sync) %{_datarootdir}/cvmfs-sync
+%{_unitdir}/*
 
 
 %doc
