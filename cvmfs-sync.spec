@@ -8,6 +8,7 @@ URL:            https://github.com/bbockelm/cvmfs-sync
 Source0:        cvmfs-sync-%{version}.tar.gz
 
 Requires:       cvmfs-server
+Requires:	xrootd-python
 Requires(pre): 	shadow-utils
 
 BuildArch: 	noarch
