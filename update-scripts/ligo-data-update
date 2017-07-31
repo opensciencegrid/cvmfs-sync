@@ -55,7 +55,8 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 # May revisit later.
 pub_failed=0
 pushd ~
-PYTHONUNBUFFERED=1 cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
+PYTHONUNBUFFERED=1 cvmfs_sync -n 15 root://red-gridftp10.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
+PYTHONUNBUFFERED=1 cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/AdVirgo /cvmfs/ligo.osgstorage.org/frames/AdVirgo --ignore '*.tmp'
 #PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER10 /cvmfs/ligo.osgstorage.org/frames/ER10 --ignore '*.tmp'
 #PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER8 /cvmfs/ligo.osgstorage.org/frames/ER8 --ignore '*.tmp'
 #PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O1 /cvmfs/ligo.osgstorage.org/frames/O1 --ignore '*.tmp'
