@@ -1,0 +1,38 @@
+#!/bin/sh
+
+pub_failed=1
+query_failed=1
+authz_location=$PWD/cms_authz
+
+function finish_txn {
+  if [ $pub_failed -eq 1 ]; then
+    cvmfs_server abort -f
+    exit 1
+  elif [ $query_failed -eq 1 ]; then
+    cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    exit 2
+  else
+    exec cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+  fi
+}
+
+echo "Starting CMS data update at `date`"
+
+voms-proxy-init -rfc -valid 168:00 -voms cms
+
+echo "Aborting any old transaction."
+cvmfs_server abort -f cms.osgstorage.org
+echo "Starting new transaction."
+set -e
+cvmfs_server transaction cms.osgstorage.org
+set +e
+trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
+
+# For now, publish even on failure - we want to publish partial progress.
+# May revisit later.
+pub_failed=0
+cvmfs_sync_location=$PWD/cvmfs-sync
+pushd ~
+PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store /cvmfs/cms.osgstorage.org/store --ignore 'unmerged' --ignore 'temp'
+popd
+
