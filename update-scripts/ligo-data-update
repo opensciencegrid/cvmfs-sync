@@ -12,7 +12,10 @@ function finish_txn {
     cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
     exit 2
   else
-    exec cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    exit_result=$?
+    rm $tmp_file
+    exit $exit_result
   fi
 }
 
