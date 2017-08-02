@@ -139,7 +139,10 @@ def should_skip(input_url, output_filename, size):
 def process_checksum_file(gridftp_url, output_filename):
     parsed = urlparse.urlparse(gridftp_url)
     print "Querying GridFTP server for %s" % gridftp_url
-    output = subprocess.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path])
+    try:
+        output = subprocess.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path])
+    except subprocess.CalledProcessError as cpe:  # https://bugs.python.org/issue9400 - CalledProcessError messes up multiprocessing
+        raise Exception("UberFTP call failed. (cmd=%s, output=%s, returncode=%s)" % (cpe.cmd, cpe.output, str(cpe.returncode)))
     cvmfs_cksum = None
     for line in output.splitlines():
         line = line.strip()
@@ -156,7 +159,6 @@ def process_checksum_file(gridftp_url, output_filename):
             fp.write(graftfile + "\n")
     else:
         raise Exception("Remote GridFTP server did not return a CVMFS checksum")
-    #print output
 
 
 def process_files_impl(filenames, base_url, gridftp_base_url, output_dir, count):
@@ -179,12 +181,18 @@ def process_files_impl(filenames, base_url, gridftp_base_url, output_dir, count)
         futures.append(future)
         #break
     pool.close()
-    for future in futures:
-        try:
-            future.get()
-        except Exception as e:
-            print "Failure when trying to checksum %s (size %d); will regenerate.  Exception: %s" % (future.filename, future.size, str(e))
-            broken_filenames.append((future.filename, future.size))
+    while futures:
+        timed_out_futures = []
+        for future in futures:
+            try:
+                future.get(180)
+            except multiprocessing.TimeoutError:
+                print "Timed out when waiting for file %s; will retry later." % future.filename
+                timed_out_futures.append(future)
+            except Exception as e:
+                print "Failure when trying to checksum %s (size %d); will regenerate.  Exception: %s" % (future.filename, future.size, str(e))
+                broken_filenames.append((future.filename, future.size))
+        futures = timed_out_futures
     print "All jobs processed - closing up pool."
     pool.join()
     filenames = broken_filenames
