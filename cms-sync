@@ -113,7 +113,7 @@ def kickoff_graft(fp, input_url, output_filename):
 
 
 def process_files(filenames, base_url, gridftp_base_url, output_dir, count):
-    bulk_count = 100
+    bulk_count = 10000
     while filenames:
         chunk_filenames = filenames[:bulk_count]
         filenames = filenames[bulk_count:]
@@ -185,6 +185,7 @@ def process_files_impl(filenames, base_url, gridftp_base_url, output_dir, count)
         except Exception as e:
             print "Failure when trying to checksum %s (size %d); will regenerate.  Exception: %s" % (future.filename, future.size, str(e))
             broken_filenames.append((future.filename, future.size))
+    print "All jobs processed - closing up pool."
     pool.join()
     filenames = broken_filenames
 
