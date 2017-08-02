@@ -37,9 +37,11 @@ else
 fi
 
 # Generate a new authz list which we will use for publication
-if `/usr/libexec/cvmfs-sync/ligo-auth-gen ligo_authz -w whitelist`; then
+tmp_file=`mktemp`
+if `/usr/libexec/cvmfs-sync/ligo-auth-gen $tmp_file -w whitelist`; then
   echo "Successfully updated LIGO user list."
   query_failed=0
+  authz_location=$tmp_file
 else
   echo "Failed to update LIGO user list but proceeding with update."
 fi
