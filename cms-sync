@@ -4,6 +4,7 @@ import os
 import sys
 import time
 import errno
+import random
 import fnmatch
 import optparse
 import urlparse
@@ -172,7 +173,9 @@ def process_dir(base_url, directory, output_dir, ignore=None):
             print status
             continue
         xrootd_cwd_names = set()
-        for entry in dirlist.dirlist:
+        entries = list(dirlist.dirlist)
+        random.shuffle(entries)
+        for entry in entries:
             should_ignore = False
             if ignore:
                 for ignore_rule in ignore.split(","):
