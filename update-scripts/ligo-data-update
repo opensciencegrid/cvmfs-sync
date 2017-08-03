@@ -9,7 +9,8 @@ function finish_txn {
     cvmfs_server abort -f
     exit 1
   elif [ $query_failed -eq 1 ]; then
-    cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    echo "Failing publish because authentication query failed"
+    echo "Is the LIGO authentication servers working and responding to requests?"
     exit 2
   else
     cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
@@ -43,7 +44,10 @@ if `/usr/libexec/cvmfs-sync/ligo-auth-gen $tmp_file -w whitelist`; then
   query_failed=0
   authz_location=$tmp_file
 else
-  echo "Failed to update LIGO user list but proceeding with update."
+  echo "Failed to update LIGO user list, so exiting"
+  echo "Is the LIGO authentication servers working and responding to requests?"
+  query_failed=1
+  exit 2
 fi
 
 # Periodically, we'll get a "ligo.osgstorage.org is not based on the newest published revision";
