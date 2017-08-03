@@ -4,7 +4,6 @@ import os
 import sys
 import time
 import errno
-import signal
 import fnmatch
 import optparse
 import urlparse
@@ -23,8 +22,6 @@ g_failed_files = []
 g_processed_files = []
 g_bytes_xfer = 0
 g_bytes_xfer_lock = threading.Lock()
-
-signal.alarm(4*3600)
 
 def inc_bytes(count):
     global g_bytes_xfer
@@ -103,6 +100,9 @@ def process_files(filenames, base_url, gridftp_base_url, output_dir, count):
     pool = multiprocessing.Pool(count)
     futures = []
     for filename, size in filenames:
+        if len(futures) >= 20000:
+            print "Queue of 20k files to checksum has been reached; will attempt remainder next time."
+            break
         gridftp_url = gridftp_base_url + filename
         output_filename = output_dir + filename
         input_url = base_url + filename
