@@ -9,10 +9,10 @@ function finish_txn {
     cvmfs_server abort -f
     exit 1
   elif [ $query_failed -eq 1 ]; then
-    cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    cvmfs_server publish -F $authz_location -X cms.osgstorage.org
     exit 2
   else
-    exec cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    exec cvmfs_server publish -F $authz_location -X cms.osgstorage.org
   fi
 }
 
@@ -31,8 +31,12 @@ trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
-cvmfs_sync_location=$PWD/cvmfs-sync
+cvmfs_sync_location=$PWD/cms-sync
+export X509_USER_PROXY=$PWD/cms_credential
 pushd ~
-PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store /cvmfs/cms.osgstorage.org/store --ignore 'unmerged' --ignore 'temp'
+PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp13.unl.edu//store/relval/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/relval/ /cvmfs/cms.osgstorage.org/store/relval/ -n 180
+PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp13.unl.edu//store/mc/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/mc/ /cvmfs/cms.osgstorage.org/store/mc/ -n 180
+PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp13.unl.edu//store/data/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/data/ /cvmfs/cms.osgstorage.org/store/data/ -n 180
+PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp13.unl.edu//store/user/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/user/ /cvmfs/cms.osgstorage.org/store/user/ -n 180
 popd
 
