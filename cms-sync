@@ -58,6 +58,13 @@ def graft_filename(filename):
 def should_skip(input_url, output_filename, size):
     global g_skip_count
     graftfile = graft_filename(output_filename)
+
+    # CVMFS checksum format has trouble with very large files.
+    # There's additionally suspicious-looking failures around zero-sized
+    # files.
+    if (size > 30*(1024**3)) or (size == 0):
+        return True
+
     if os.path.exists(output_filename):
         st = os.stat(output_filename)
         if size == st.st_size:
@@ -150,7 +157,7 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=None):
                 g_bytes_xfer += future.size
             except multiprocessing.TimeoutError:
                 print "Timed out when waiting for file %s; will retry later." % future.filename
-                timed_out_futures.append(future)
+                #timed_out_futures.append(future)
             except Exception as e:
                 print "Failure when trying to checksum %s (size %d); will regenerate.  Exception: %s" % (future.filename, future.size, str(e))
                 g_failed_files.append(gridftp_base_url + "/" + future.filename)
@@ -202,7 +209,10 @@ def process_dir(base_url, directory, output_dir, ignore=None):
             if name.startswith("."): continue
             fname = os.path.join(cwd_output, name)
             print "Candidate for removal:", fname
-
+            try:
+                os.unlink(fname)
+            except OSError as oe:
+                print "Failed to remove file %s: %s" % (fname, str(oe))
 
 def main():
     opts, args = parse_opts()
