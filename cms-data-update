@@ -18,7 +18,7 @@ function finish_txn {
 
 echo "Starting CMS data update at `date`"
 
-voms-proxy-init -rfc -valid 168:00 -voms cms
+voms-proxy-init -rfc -valid 168:00 -voms cms -out $PWD/cms_credential
 
 echo "Aborting any old transaction."
 cvmfs_server abort -f cms.osgstorage.org
@@ -32,7 +32,7 @@ trap finish_txn EXIT SIGHUP SIGINT SIGTERM
 # May revisit later.
 pub_failed=0
 cvmfs_sync_location=$PWD/cms-sync
-#export X509_USER_PROXY=$PWD/cms_credential
+export X509_USER_PROXY=$PWD/cms_credential
 pushd ~
 PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp12.unl.edu//store/relval/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/relval/ /cvmfs/cms.osgstorage.org/store/relval/ -n 180 --ignore '*RemoteStageOutTest*'
 PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp12.unl.edu//store/mc/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/mc/ /cvmfs/cms.osgstorage.org/store/mc/ -n 180 --ignore '*RemoteStageOutTest*'
