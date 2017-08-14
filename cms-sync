@@ -12,6 +12,11 @@ import threading
 import subprocess
 import multiprocessing
 
+try:
+    import subprocess32
+except ImportError:
+    subprocess32 = None
+
 oldpath = sys.path
 sys.path = sys.path[1:]
 
@@ -62,7 +67,7 @@ def should_skip(input_url, output_filename, size):
     # CVMFS checksum format has trouble with very large files.
     # There's additionally suspicious-looking failures around zero-sized
     # files.
-    if (size > 30*(1024**3)) or (size == 0):
+    if (size > 26*(1024**3)) or (size == 0):
         return True
 
     if os.path.exists(output_filename):
@@ -100,9 +105,15 @@ def process_checksum_file(gridftp_url, output_filename):
     parsed = urlparse.urlparse(gridftp_url)
     print "Querying GridFTP server for %s" % gridftp_url
     try:
-        output = subprocess.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path])
+        if subprocess32:
+            output = subprocess32.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path], timeout=5*60)
+        else:
+            output = subprocess.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path])
     except subprocess.CalledProcessError as cpe:  # https://bugs.python.org/issue9400 - CalledProcessError messes up multiprocessing
         raise Exception("UberFTP call failed. (cmd=%s, output=%s, returncode=%s)" % (cpe.cmd, cpe.output, str(cpe.returncode)))
+    except Exception as e:
+        print "Unhandled exception", str(e)
+        raise Exception("UberFTP call failed with an unhandled exception.")
     cvmfs_cksum = None
     for line in output.splitlines():
         line = line.strip()
@@ -134,8 +145,8 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=None):
     pool = multiprocessing.Pool(count)
     futures = []
     for filename, size in process_dir(xrootd_connection_info, xrootd_directory, output_dir, ignore=ignore):
-        if len(futures) >= 20000:
-            print "Queue of 20k files to checksum has been reached; will attempt remainder next time."
+        if len(futures) >= 50000:
+            print "Queue of 50k files to checksum has been reached; will attempt remainder next time."
             break
         gridftp_url = gridftp_base_url + filename
         output_filename = output_dir + filename
