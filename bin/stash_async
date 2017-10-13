@@ -70,7 +70,7 @@ def kickoff_graft(fp, input_url, output_filename, deadline):
         try:
             os.dup2(readfp, 0)
             os.close(writefp)
-            args = ['cvmfs_swissknife', 'graft', '-i', '-', '-o', output_filename, '-Z', 'none']
+            args = ['cvmfs_swissknife', 'graft', '-i', '-', '-o', output_filename, '-Z', 'none', '-c', '24']
             os.execvp("cvmfs_swissknife", args)
         finally:
             print "Failed to exec cvmfs_swissknife for processing", input_url
