@@ -93,6 +93,8 @@ exit 0
 %{_libexecdir}/cvmfs-sync
 %{_bindir}/*
 %dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_datarootdir}/cvmfs-sync
+%{_datarootdir}/cvmfs-sync/cms_authz
+%{_datarootdir}/cvmfs-sync/ligo_authz
 %{_unitdir}/*
 
 
