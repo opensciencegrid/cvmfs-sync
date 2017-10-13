@@ -31,6 +31,6 @@ pub_failed=0
 date
 touch /cvmfs/stash.osgstorage.org/user/bbockelm
 pushd ~
-PYTHONUNBUFFERED=1 stash_async --delete -n 50 --max-time 174 root://stash.osgconnect.net//user/ /cvmfs/stash.osgstorage.org/user/
+PYTHONUNBUFFERED=1 stash_async --delete -n 50 --max-time 600 root://stash.osgconnect.net//user/ /cvmfs/stash.osgstorage.org/user/
 popd
 
