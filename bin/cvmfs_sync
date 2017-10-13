@@ -22,7 +22,7 @@ g_processed_files = []
 g_bytes_xfer = 0
 g_bytes_xfer_lock = threading.Lock()
 
-signal.alarm(4*3600)
+signal.alarm(3600)
 
 def inc_bytes(count):
     global g_bytes_xfer
@@ -52,6 +52,7 @@ def parse_opts():
 
 
 def create_read_callback(offset, readfp, writefd, filename, pid):
+    signal.alarm(300)
     def read_callback(status, response, hostlist):
         # NOTE: due to mutex ordering issues, we CANNOT invoke xrootd
         # functions (including letting objects fall out of scope).
@@ -112,6 +113,7 @@ def kickoff_graft(fp, input_url, output_filename):
 
 def process_files(filenames, base_url, output_dir, count):
     while filenames:
+        signal.alarm(300)
         chunk_filenames = filenames[:500]
         filenames = filenames[500:]
         process_files_impl(chunk_filenames, base_url, output_dir, count)
@@ -174,7 +176,7 @@ def process_files_impl(filenames, base_url, output_dir, count):
         # It's not possible to solve the race condition inherent here - we have no
         # way to notify the main thread the callback pool is done without holding
         # the GIL.  So, we do this any pray.
-        time.sleep(1)
+        time.sleep(0.1)
 
 
 def process_dir(base_url, directory, ignore=None):
@@ -185,6 +187,7 @@ def process_dir(base_url, directory, ignore=None):
     while worklist:
         cwd = worklist.pop()
         print "Processing", cwd
+        signal.alarm(300)
         status, dirlist = fs.dirlist("/" + cwd,
                                     flags=XRootD.client.flags.DirListFlags.STAT)
         if status.status:
