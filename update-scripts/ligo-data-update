@@ -60,16 +60,15 @@ cvmfs_server transaction ligo.osgstorage.org
 set +e
 trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 
+# We want to have python print out debug statements as soon as possible - helps with debugging deadlocks.
+export PYTHONUNBUFFERED=1
+
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
 pushd ~
-PYTHONUNBUFFERED=1 cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
-PYTHONUNBUFFERED=1 cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/AdVirgo /cvmfs/ligo.osgstorage.org/frames/AdVirgo --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER10 /cvmfs/ligo.osgstorage.org/frames/ER10 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER8 /cvmfs/ligo.osgstorage.org/frames/ER8 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O1 /cvmfs/ligo.osgstorage.org/frames/O1 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/postO1 /cvmfs/ligo.osgstorage.org/frames/postO1 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/S6 /cvmfs/ligo.osgstorage.org/frames/S6 --ignore '*.tmp'
+cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
+cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/AdVirgo /cvmfs/ligo.osgstorage.org/frames/AdVirgo --ignore '*.tmp'
+cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/pycbc /cvmfs/ligo.osgstorage.org/pycbc --ignore '*.tmp'
 popd
 
