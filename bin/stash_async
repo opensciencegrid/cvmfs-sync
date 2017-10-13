@@ -158,6 +158,8 @@ def list_dir(work_queue, results_queue, fs):
         try:
             status, dirlist = fs.dirlist(cwd,
                                         flags=XRootD.client.flags.DirListFlags.STAT)
+        except Exception as e:
+            print "Exception encoutered when listing directory %s: %s" % (cwd, str(e))
         finally:
             results_queue.put((status, dirlist, cwd), True)
             work_queue.task_done()
@@ -187,7 +189,7 @@ def process_dir(base_url, directory, thread_count):
             if user_dir_regexp.match(cwd):
                 cwd += "/public"
             # Upstream server has issues with these directories.
-            if cwd.startswith('/user/yadunand') or cwd.startswith('/user/ndh8') or cwd.startswith('/user/vpentchev/public/tutorial-R/result'):
+            if cwd.startswith('/user/yadunand') or cwd.startswith('/user/ndh8') or cwd.startswith('/user/vpentchev/public/tutorial-R/result') or cwd.startswith('/user/toth/public/Logs'):
                 yield '/' + cwd, -1, True
                 continue
             work_sent += 1
