@@ -9,10 +9,14 @@ function finish_txn {
     cvmfs_server abort -f
     exit 1
   elif [ $query_failed -eq 1 ]; then
-    cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    echo "Failing publish because authentication query failed"
+    echo "Is the LIGO authentication servers working and responding to requests?"
     exit 2
   else
-    exec cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    cvmfs_server publish -F $authz_location -X ligo.osgstorage.org
+    exit_result=$?
+    rm $tmp_file
+    exit $exit_result
   fi
 }
 
@@ -34,11 +38,16 @@ else
 fi
 
 # Generate a new authz list which we will use for publication
-if `./ligo-auth-gen ligo_authz -w whitelist`; then
+tmp_file=`mktemp`
+if `/usr/libexec/cvmfs-sync/ligo-auth-gen $tmp_file -w whitelist`; then
   echo "Successfully updated LIGO user list."
   query_failed=0
+  authz_location=$tmp_file
 else
-  echo "Failed to update LIGO user list but proceeding with update."
+  echo "Failed to update LIGO user list, so exiting"
+  echo "Is the LIGO authentication servers working and responding to requests?"
+  query_failed=1
+  exit 2
 fi
 
 # Periodically, we'll get a "ligo.osgstorage.org is not based on the newest published revision";
@@ -51,16 +60,15 @@ cvmfs_server transaction ligo.osgstorage.org
 set +e
 trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 
+# We want to have python print out debug statements as soon as possible - helps with debugging deadlocks.
+export PYTHONUNBUFFERED=1
+
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
-cvmfs_sync_location=$PWD/cvmfs-sync
 pushd ~
-PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER10 /cvmfs/ligo.osgstorage.org/frames/ER10 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/ER8 /cvmfs/ligo.osgstorage.org/frames/ER8 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O1 /cvmfs/ligo.osgstorage.org/frames/O1 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/postO1 /cvmfs/ligo.osgstorage.org/frames/postO1 --ignore '*.tmp'
-#PYTHONUNBUFFERED=1 $cvmfs_sync_location -n 15 root://xrootd-local.unl.edu//user/ligo/frames/S6 /cvmfs/ligo.osgstorage.org/frames/S6 --ignore '*.tmp'
+cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/O2 /cvmfs/ligo.osgstorage.org/frames/O2 --ignore '*.tmp'
+cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/frames/AdVirgo /cvmfs/ligo.osgstorage.org/frames/AdVirgo --ignore '*.tmp'
+cvmfs_sync -n 15 root://xrootd-local.unl.edu//user/ligo/pycbc /cvmfs/ligo.osgstorage.org/pycbc --ignore '*.tmp'
 popd
 

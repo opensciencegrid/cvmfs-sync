@@ -5,3 +5,6 @@ LIGO:/ligo
 /DC=org/DC=opensciencegrid/O=Open Science Grid/OU=Services/CN=diskcache/sugwg-test1.phy.syr.edu
 /DC=org/DC=opensciencegrid/O=Open Science Grid/OU=Services/CN=diskcache/sugwg-osg.phy.syr.edu
 /DC=org/DC=opensciencegrid/O=Open Science Grid/OU=Services/CN=diskcache/sugwg-condor.phy.syr.edu
+/C=UK/O=eScience/OU=CLRC/L=RAL/CN=alastair dewhurst
+/C=UK/O=eScience/OU=CLRC/L=RAL/CN=catalin condurache
+/DC=ch/DC=cern/OU=Organic Units/OU=Users/CN=bbockelm/CN=659869/CN=Brian Paul Bockelman

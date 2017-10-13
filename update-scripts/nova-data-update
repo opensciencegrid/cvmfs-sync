@@ -1,0 +1,34 @@
+#!/bin/sh
+
+pub_failed=1
+
+function finish_txn {
+  if [ $pub_failed -eq 1 ]; then
+    cvmfs_server abort -f
+    exit 1
+  else
+    exec cvmfs_server publish -X nova.osgstorage.org
+  fi
+}
+
+echo "Starting NOvA public data update at `date`"
+
+# Periodically, we'll get a "ligo.osgstorage.org is not based on the newest published revision";
+# this seems to clear it up.
+cvmfs_server abort -f nova.osgstorage.org
+set -e
+cvmfs_server transaction nova.osgstorage.org
+set +e
+
+trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
+
+# For now, publish even on failure - we want to publish partial progress.
+# May revisit later.
+pub_failed=0
+date
+pushd ~
+touch /cvmfs/nova.osgstorage.org/pnfs
+PYTHONUNBUFFERED=1 cvmfs_sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/data/flux/ /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/data/flux/
+PYTHONUNBUFFERED=1 cvmfs_sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/persistent/analysis /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/persistent/analysis
+popd
+
