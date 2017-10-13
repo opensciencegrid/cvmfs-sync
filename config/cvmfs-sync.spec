@@ -40,7 +40,7 @@ install -m 0755 bin/cms_sync $RPM_BUILD_ROOT/%{_bindir}/cms_sync
 install -d $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync
 install -m 0755 update-scripts/* $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/
 
-install -m 0755 ligo-auth-gen $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/ligo-auth-gen
+install -m 0755 bin/ligo-auth-gen $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/ligo-auth-gen
 
 # Install the SystemD unit files
 install -d $RPM_BUILD_ROOT/%{_unitdir}
@@ -48,7 +48,7 @@ install -m 0600 config/*.service $RPM_BUILD_ROOT/%{_unitdir}/
 
 # Install the authorization files.
 install -d $RPM_BUILD_ROOT/%{_datarootdir}/cvmfs-sync
-install -m 0644 ligo_authz cms_authz $RPM_BUILD_ROOT/%{_datarootdir}/cvmfs-sync
+install -m 0644 config/ligo_authz config/cms_authz $RPM_BUILD_ROOT/%{_datarootdir}/cvmfs-sync
 
 %pre
 # Install the cvmfs-sync user
