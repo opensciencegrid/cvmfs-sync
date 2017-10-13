@@ -1,6 +1,6 @@
 Name:           cvmfs-sync
-Version:        2.0
-Release:        2%{?dist}
+Version:        2.1
+Release:        1%{?dist}
 Summary:        CVMFS Sync
 
 License:        ASL 2.0
@@ -40,13 +40,15 @@ install -m 0755 bin/cms_sync $RPM_BUILD_ROOT/%{_bindir}/cms_sync
 install -d $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync
 install -m 0755 update-scripts/* $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/
 
-install -d $RPM_BUILD_ROOT/%{_datarootdir}/cvmfs-sync
 install -m 0755 ligo-auth-gen $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/ligo-auth-gen
 
 # Install the SystemD unit files
 install -d $RPM_BUILD_ROOT/%{_unitdir}
 install -m 0600 config/*.service $RPM_BUILD_ROOT/%{_unitdir}/
 
+# Install the authorization files.
+install -d $RPM_BUILD_ROOT/%{_datarootdir}/cvmfs-sync
+install -m 0644 ligo_authz cms_authz $RPM_BUILD_ROOT/%{_datarootdir}/cvmfs-sync
 
 %pre
 # Install the cvmfs-sync user
@@ -98,6 +100,9 @@ exit 0
 
 
 %changelog
+* Fri Oct 13 2017 Brian Bockelman - 2.1-1
+- Include authz files into the RPM.
+
 * Fri Oct 13 2017 Brian Bockelman - 2.0-2
 - Properly handle systemd deps.
 
