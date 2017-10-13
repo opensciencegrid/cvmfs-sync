@@ -1,20 +1,25 @@
 Name:           cvmfs-sync
-Version:        1.0
-Release:        1%{?dist}
+Version:        2.0
+Release:        2%{?dist}
 Summary:        CVMFS Sync
 
 License:        ASL 2.0
 URL:            https://github.com/bbockelm/cvmfs-sync
-Source0:        cvmfs-sync-%{version}.tar.gz
+# Generated from:
+# git archive --format=tgz --prefix=%{name}-%{version}/ v%{version} > %{name}-%{version}.tar.gz
+Source0:        %{name}-%{version}.tar.gz
 
 Requires:       cvmfs-server
 Requires:	xrootd-python
 Requires(pre): 	shadow-utils
 
+%{?systemd_requires}
+BuildRequires: systemd
+
 BuildArch: 	noarch
 
 %description
-
+Various scripts to help synchronize *.osgstorage.org repositories to CVMFS.
 
 %prep
 %setup -q
@@ -29,6 +34,7 @@ rm -rf $RPM_BUILD_ROOT
 install -d $RPM_BUILD_ROOT/%{_bindir}
 install -m 0755 bin/stash_async $RPM_BUILD_ROOT/%{_bindir}/stash_async
 install -m 0755 bin/cvmfs_sync $RPM_BUILD_ROOT/%{_bindir}/cvmfs_sync
+install -m 0755 bin/cms_sync $RPM_BUILD_ROOT/%{_bindir}/cms_sync
 
 # Install update scripts
 install -d $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync
@@ -41,6 +47,7 @@ install -m 0755 ligo-auth-gen $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/ligo-aut
 install -d $RPM_BUILD_ROOT/%{_unitdir}
 install -m 0600 config/*.service $RPM_BUILD_ROOT/%{_unitdir}/
 
+
 %pre
 # Install the cvmfs-sync user
 getent group cvmfs-sync >/dev/null || groupadd -r cvmfs-sync
@@ -48,6 +55,36 @@ getent passwd cvmfs-sync >/dev/null || \
     useradd -r -g cvmfs-sync -d /usr/share/cvmfs-sync -s /sbin/nologin \
     -c "User to synchronize CVMFS with a remote XRootD server namespace" cvmfs-sync
 exit 0
+
+
+%post
+%systemd_post cms-data-update.service
+%systemd_post ligo-data-update.service
+%systemd_post nova-data-update.service
+%systemd_post des-data-update.service
+%systemd_post mu2e-data-update.service
+%systemd_post stash-data-update.service
+%systemd_post uboone-data-update.service
+
+
+%preun
+%systemd_preun cms-data-update.service
+%systemd_preun ligo-data-update.service
+%systemd_preun nova-data-update.service
+%systemd_preun des-data-update.service
+%systemd_preun mu2e-data-update.service
+%systemd_preun stash-data-update.service
+%systemd_preun uboone-data-update.service
+
+
+%postun
+%systemd_postun cms-data-update.service
+%systemd_postun ligo-data-update.service
+%systemd_postun nova-data-update.service
+%systemd_postun des-data-update.service
+%systemd_postun mu2e-data-update.service
+%systemd_postun stash-data-update.service
+%systemd_postun uboone-data-update.service
 
 
 %files
@@ -60,5 +97,10 @@ exit 0
 %doc
 
 
-
 %changelog
+* Fri Oct 13 2017 Brian Bockelman - 2.0-2
+- Properly handle systemd deps.
+
+* Fri Oct 13 2017 Brian Bockelman - 2.0-1
+- Integrate new CMS sync script into release.
+
