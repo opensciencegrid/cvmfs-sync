@@ -28,15 +28,17 @@ cvmfs_server transaction cms.osgstorage.org
 set +e
 trap finish_txn EXIT SIGHUP SIGINT SIGTERM
 
+# Make sure python always dumps out any debugging
+export PYTHONUNBUFFERED=1
+
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
-cvmfs_sync_location=$PWD/cms-sync
 export X509_USER_PROXY=$PWD/cms_credential
 pushd ~
-PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp12.unl.edu//store/relval/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/relval/ /cvmfs/cms.osgstorage.org/store/relval/ -n 180 --ignore '*RemoteStageOutTest*'
-PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp12.unl.edu//store/mc/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/mc/ /cvmfs/cms.osgstorage.org/store/mc/ -n 180 --ignore '*RemoteStageOutTest*'
-PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp12.unl.edu//store/data/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/data/ /cvmfs/cms.osgstorage.org/store/data/ -n 180 --ignore '*RemoteStageOutTest*'
-PYTHONUNBUFFERED=1 $cvmfs_sync_location root://red-gridftp12.unl.edu//store/user/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/user/ /cvmfs/cms.osgstorage.org/store/user/ -n 180 --ignore '*RemoteStageOutTest*'
+cms_sync root://red-gridftp12.unl.edu//store/relval/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/relval/ /cvmfs/cms.osgstorage.org/store/relval/ -n 180 --ignore '*RemoteStageOutTest*'
+cms_sync root://red-gridftp12.unl.edu//store/mc/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/mc/ /cvmfs/cms.osgstorage.org/store/mc/ -n 180 --ignore '*RemoteStageOutTest*'
+cms_sync root://red-gridftp12.unl.edu//store/data/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/data/ /cvmfs/cms.osgstorage.org/store/data/ -n 180 --ignore '*RemoteStageOutTest*'
+cms_sync root://red-gridftp12.unl.edu//store/user/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/user/ /cvmfs/cms.osgstorage.org/store/user/ -n 180 --ignore '*RemoteStageOutTest*'
 popd
 
