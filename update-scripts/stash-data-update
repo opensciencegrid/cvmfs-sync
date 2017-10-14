@@ -34,9 +34,14 @@ date
 touch /cvmfs/stash.osgstorage.org/user/bbockelm
 pushd ~
 
+# Note the '--include' here is a bit of magic to activate a hack to
+# setup the public sub-directory.
+
 cvmfs_sync \
     --concurrency 50 \
     --max-time 600 \
+    --ignore '*.swp' \
+    --include '/user/*/public/*' \
     root://stash.osgconnect.net//user/ \
     /cvmfs/stash.osgstorage.org/user/
 

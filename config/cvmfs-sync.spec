@@ -1,5 +1,5 @@
 Name:           cvmfs-sync
-Version:        2.1
+Version:        2.2
 Release:        1%{?dist}
 Summary:        CVMFS Sync
 
@@ -32,9 +32,7 @@ Various scripts to help synchronize *.osgstorage.org repositories to CVMFS.
 rm -rf $RPM_BUILD_ROOT
 
 install -d $RPM_BUILD_ROOT/%{_bindir}
-install -m 0755 bin/stash_async $RPM_BUILD_ROOT/%{_bindir}/stash_async
 install -m 0755 bin/cvmfs_sync $RPM_BUILD_ROOT/%{_bindir}/cvmfs_sync
-install -m 0755 bin/cms_sync $RPM_BUILD_ROOT/%{_bindir}/cms_sync
 
 # Install update scripts
 install -d $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync
@@ -91,7 +89,7 @@ exit 0
 
 %files
 %{_libexecdir}/cvmfs-sync
-%{_bindir}/*
+%{_bindir}/cvmfs_sync
 %dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_datarootdir}/cvmfs-sync
 %{_datarootdir}/cvmfs-sync/cms_authz
 %{_datarootdir}/cvmfs-sync/ligo_authz
@@ -102,6 +100,9 @@ exit 0
 
 
 %changelog
+* Sat Oct 14 2017 Brian Bockelman - 2.2-1
+- Unify all data update scripts to use cvmfs_sync.
+
 * Fri Oct 13 2017 Brian Bockelman - 2.1-1
 - Include authz files into the RPM.
 
