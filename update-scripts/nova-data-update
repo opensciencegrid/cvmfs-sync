@@ -22,13 +22,22 @@ set +e
 
 trap finish_txn EXIT ERR SIGHUP SIGINT SIGTERM
 
+export PYTHONUNBUFFERED=1
+
 # For now, publish even on failure - we want to publish partial progress.
 # May revisit later.
 pub_failed=0
 date
 pushd ~
 touch /cvmfs/nova.osgstorage.org/pnfs
-PYTHONUNBUFFERED=1 cvmfs_sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/data/flux/ /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/data/flux/
-PYTHONUNBUFFERED=1 cvmfs_sync root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/persistent/analysis /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/persistent/analysis
+
+cvmfs_sync \
+    root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/data/flux/ \
+    /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/data/flux/
+
+cvmfs_sync \
+    root://stashcache.fnal.gov//pnfs/fnal.gov/usr/nova/persistent/analysis \
+    /cvmfs/nova.osgstorage.org/pnfs/fnal.gov/usr/nova/persistent/analysis
+
 popd
 
