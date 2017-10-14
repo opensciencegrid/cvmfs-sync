@@ -4,11 +4,22 @@ import os
 import sys
 import time
 import errno
-import signal
+import xattr
+import Queue
+import random
+import shutil
+import logging
 import fnmatch
 import optparse
 import urlparse
 import threading
+import subprocess
+import multiprocessing
+
+try:
+    import subprocess32
+except ImportError:
+    subprocess32 = None
 
 oldpath = sys.path
 sys.path = sys.path[1:]
@@ -20,27 +31,33 @@ sys.path = oldpath
 g_failed_files = []
 g_processed_files = []
 g_bytes_xfer = 0
-g_bytes_xfer_lock = threading.Lock()
+g_skip_count = 0
 
-signal.alarm(3600)
+def full_norm_path(path):
+    path = os.path.normpath(path)
+    if path.startswith("//"):
+        path = path[1:]
+    return path
 
-def inc_bytes(count):
-    global g_bytes_xfer
-    g_bytes_xfer_lock.acquire()
-    try:
-        g_bytes_xfer += count
-    finally:
-        g_bytes_xfer_lock.release()
 
 def parse_opts():
     parser = optparse.OptionParser(usage="%prog [options] src1 [src2 ...] dest")
     parser.add_option("-n", "--concurrency", dest="concurrency",
-                       help="Number of helper processes", default=4,
+                       help="Number of helper processes for processing data", default=4,
+                       type="int")
+    parser.add_option("-m", "--metadata-concurrency", dest="metadata_concurrency",
+                       help="Number of helper threads for processing metadata", default=2,
                        type="int")
     parser.add_option("-f", "--failed", dest="failed",
                       help="Output filename for list of failed files")
     parser.add_option("-i", "--ignore", dest="ignore",
                       help="Unix glob of filenames to ignore.")
+    parser.add_option("--include", dest="include",
+                      help="Unix glob of paths to include.")
+    parser.add_option("-v", "--verbose", dest="verbose", default=False, action="store_true",
+                      help="Enable verbose printout.")
+    parser.add_option("-t", "--max-time", dest="max_time", type="int", default=0,
+                      help="Time threshold for starting new transfers, in minutes.")
 
     opts, args = parser.parse_args()
     if len(args) < 2:
@@ -48,45 +65,105 @@ def parse_opts():
         parser.print_usage()
         sys.exit(1)
 
+    if opts.ignore:
+        opts.ignore = [full_norm_path(i) for i in opts.ignore.split(",")]
+    else:
+        opts.ignore = []
+    if opts.include:
+        opts.include = [full_norm_path(i) for i in opts.include.split(",")]
+    else:
+        opts.include = []
+
+    if opts.verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s: %(message)s")
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)-8s: %(message)s")
+
     return opts, args
 
 
-def create_read_callback(offset, readfp, writefd, filename, pid):
-    signal.alarm(300)
-    def read_callback(status, response, hostlist):
-        # NOTE: due to mutex ordering issues, we CANNOT invoke xrootd
-        # functions (including letting objects fall out of scope).
-        #print "Read callback for %s, offset %d, response" % (filename, offset)
-        if status.status:
-            print "Read callback failed for %s:" % filename, status
-            print "Hostlist:", hostlist
-            for host in hostlist.hosts:
-                print "-", host.url
-            g_failed_files.append(filename)
-            os.kill(pid, signal.SIGKILL)
-            # In this case, response is None; close and fail out.
-        if (response == None) or (len(response) == 0):
-            print "Finished processing", filename
-            os.close(writefd)
+def should_ignore_path(entry_name, ignore, include):
+    norm_entry_name = full_norm_path(entry_name)
+    should_ignore = bool(include)
+    path_count = len(norm_entry_name.split("/"))
+    for include_rule in include:
+        if include_rule.startswith("/"):
+            include_rule = "/".join(include_rule.split("/")[:path_count])
+        if fnmatch.fnmatch(norm_entry_name, include_rule):
+            should_ignore = False
+            break
+    if should_ignore:
+        return True
+    for ignore_rule in ignore:
+         if fnmatch.fnmatch(norm_entry_name, ignore_rule):
+             return True
+    return False
+
+
+def graft_filename(filename):
+    parent_dir, fname = os.path.split(filename)
+    return os.path.join(parent_dir, ".cvmfsgraft-" + fname)
+
+
+def should_skip(input_url, output_filename, size):
+    global g_skip_count
+    graftfile = graft_filename(output_filename)
+
+    # CVMFS checksum format has trouble with very large files.
+    # There's additionally suspicious-looking failures around zero-sized
+    # files.
+    if (size > 26*(1024**3)) or (size == 0):
+        return True
+
+    if os.path.exists(output_filename):
+        st = os.stat(output_filename)
+        if size == st.st_size:
+            g_skip_count += 1
+            return True
+        elif os.path.exists(graftfile):
+            graft_size = -1
+            with open(graftfile, "r") as fp:
+                for line in fp:
+                    if line.startswith("size="):
+                        try:
+                            graft_size = int(line.strip().split("=", 1)[-1])
+                            break
+                        except:
+                            pass
+            if size == graft_size:
+                g_skip_count += 1
+                return True
+            logging.warning("Graft size mismatch!  Regenerating file %s (size %d) -> %s (graft size %d)" % \
+                    (input_url, size, output_filename, graft_size))
         else:
-            inc_bytes(len(response))
-            os.write(writefd, response)
-            next_offset = offset + len(response)
-            kwargs = {'offset': next_offset,
-                      'size': 1024*1024,
-                      'callback': create_read_callback(next_offset, readfp,
-                                                writefd, filename, pid)
-                     }
-            status = readfp.read(**kwargs)
-            if status.status:
-                print "Failed to create callback for", filename
-                g_failed_files.append(filename)
-                os.kill(pid, signal.SIGKILL)
+            logging.warning("Size mismatch!  Regenerating file %s (size %d) -> %s (size %d)" % \
+                    (input_url, size, output_filename, st.st_size))
+            os.unlink(output_filename)
+    try:
+        os.makedirs(os.path.split(output_filename)[0])
+    except OSError, oe:
+        if oe.errno != errno.EEXIST:
+            raise
+    return False
 
-    return read_callback
+def process_download_file(xrootd_url, output_filename, deadline):
+    """
+    Download an entire file to the local host and stream its contents through cvmfs_swissknife
+    in order to create checksums.
+    """
+    if (deadline > 0) and (time.time() > deadline):
+        raise Exception("URL %s timed out when still in processing queue." % xrootd_url)
 
+    fp = XRootD.client.File()
+    status = fp.open(xrootd_url)[0]
+    if status.status:
+        raise Exception("Failed to open file (%s) in Xrootd: %s" % (xrootd_url, status))
 
-def kickoff_graft(fp, input_url, output_filename):
+    # Check deadline again; file-open may have taken awhile for an unresponsive server.
+    if (deadline > 0) and (time.time() > deadline):
+        raise Exception("URL %s timed out while being opened." % xrootd_url)
+
+    logging.info("Grafting %s to %s" % (xrootd_url, output_filename))
     readfp, writefp = os.pipe()
     pid = os.fork()
     if not pid:
@@ -96,121 +173,242 @@ def kickoff_graft(fp, input_url, output_filename):
             args = ['cvmfs_swissknife', 'graft', '-i', '-', '-o', output_filename, '-Z', 'none', '-c', '24']
             os.execvp("cvmfs_swissknife", args)
         finally:
-            print "Failed to exec cvmfs_swissknife for processing", input_url
-            os._exit(1)
+            raise Exception("Failed to exec cvmfs_swissknife for processing URL %s" % xrootd_url)
+
     os.close(readfp)
-    callback = create_read_callback(0, fp, writefp, input_url, pid)
-    status = fp.read(offset=0, size=1024*1024, callback=callback)
-    if status.status:
-        print "Failed to create read request for", input_url
-        print "Status:", status
-        print "Killing graft PID", pid
-        os.kill(pid, signal.SIGKILL)
-        g_failed_files.append(input_url)
-        return False
-    return True
+    next_offset = 0
+    while True:
+        if (deadline > 0) and (time.time() > deadline):
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            raise Exception("Timed out when transferring URL %s" % xrootd_url)
+
+        status, response = fp.read(offset=next_offset, size=1024*1024)
+        if status.status:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+            raise Exception("Failed to create read request for %s; status: %s; killing graft %d" % (xrootd_url, str(status), pid))
+
+        # Empty response indicates EOF.
+        if (response == None) or (len(response) == 0):
+            logging.debug("Finished processing URL %s" % xrootd_url)
+            os.close(writefp)
+            os.waitpid(pid, 0)
+            break
+        else:
+            try:
+                os.write(writefp, response)
+            except OSError, oe:
+                if oe.errno != errno.EPIPE:
+                    raise
+                logging.error("cvmfs_swissknife process unexpectedly died.")
+                return False
+            next_offset += len(response)
+    return next_offset
+
+def process_checksum_file(gridftp_url, xrootd_url, output_filename, deadline):
+    """
+    Process and create a CVMFS checksum / graft file.
+
+    If a GridFTP server is available, use that to generate a checksum file.  Otherwise,
+    utilize Xrootd to download the file to memory and checksum it locally.
+    """
+    if not gridftp_url:
+        return process_download_file(xrootd_url, output_filename, deadline)
+
+    parsed = urlparse.urlparse(gridftp_url)
+    logging.info("Querying GridFTP server for %s" % gridftp_url)
+    try:
+        if subprocess32:
+            output = subprocess32.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path], timeout=5*60)
+        else:
+            output = subprocess.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path])
+    except subprocess.CalledProcessError as cpe:  # https://bugs.python.org/issue9400 - CalledProcessError messes up multiprocessing
+        raise Exception("UberFTP call failed. (cmd=%s, output=%s, returncode=%s)" % (cpe.cmd, cpe.output, str(cpe.returncode)))
+    except Exception as e:
+        logging.error("Unhandled exception %s" % str(e))
+        raise Exception("UberFTP call failed with an unhandled exception.")
+    cvmfs_cksum = None
+    for line in output.splitlines():
+        line = line.strip()
+        if line.startswith("500"):
+            raise Exception(line)
+        elif line.startswith("213 "):
+            cvmfs_cksum = line[4:]
+    if cvmfs_cksum:
+        with open(output_filename, "w") as fp:
+            pass
+        graftfile = cvmfs_cksum.replace(";", "\n")
+        with open(graft_filename(output_filename), "w") as fp:
+            fp.write(graftfile + "\n")
+    else:
+        raise Exception("Remote GridFTP server did not return a CVMFS checksum")
+    return 0
 
 
-def process_files(filenames, base_url, output_dir, count):
-    while filenames:
-        signal.alarm(300)
-        chunk_filenames = filenames[:500]
-        filenames = filenames[500:]
-        process_files_impl(chunk_filenames, base_url, output_dir, count)
+def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], include=[], thread_count=2, deadline=0):
+    global g_bytes_xfer
 
-
-def process_files_impl(filenames, base_url, output_dir, count):
     current = 0
     worklist = []
 
-    # Serialize on opening files
-    for filename, size in filenames:
-        input_url = base_url + filename
-        output_filename = output_dir + filename
-        if os.path.exists(output_filename):
-            st = os.stat(output_filename)
-            if size == st.st_size:
-                #print "Skipping file %s as %s already exists." % \
-                #    (input_url, output_filename)
-                continue
-            else:
-                print "Size mismatch!  Regenerating file %s (size %d) -> %s (size %d)" % \
-                    (input_url, size, output_filename, st.st_size)
-                os.unlink(output_filename)
-        try:
-            os.makedirs(os.path.split(output_filename)[0])
-        except OSError, oe:
-            if oe.errno != errno.EEXIST:
-                raise
-        fp = XRootD.client.File()
-        status = fp.open(input_url)[0]
-        if status.status:
-            g_failed_files.append(input_url)
-            print "Failed to open file %s:" % input_url, status
+    xrootd_base_parsed = urlparse.urlparse(base_url)
+    xrootd_connection_info = xrootd_base_parsed.scheme + "://" + xrootd_base_parsed.netloc
+    xrootd_directory = xrootd_base_parsed.path
+
+    # First, try to retrieve the file
+    pool = multiprocessing.Pool(count)
+    futures = []
+    for filename, size in process_dir(xrootd_connection_info, xrootd_directory, output_dir, ignore=ignore, include=include, thread_count=thread_count):
+        if deadline and (time.time() > deadline):
+            logging.error("Passed deadline when scanning directory tree")
+            break
+        if len(futures) >= 50000:
+        #if len(futures) >= 50:
+            logging.info("Queue of 50k files to checksum has been reached; will attempt remainder next time.")
+            break
+        if gridftp_base_url:
+            gridftp_url = gridftp_base_url + filename
         else:
-            worklist.append((filename, fp))
+            gridftp_url = None
+        xrootd_url = base_url + filename
+        output_filename = output_dir + filename
+        input_url = base_url + filename
+        if should_skip(input_url, output_filename, size):
+            continue
+        future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, deadline))
+        future.filename = filename
+        future.size = size
+        futures.append(future)
+        #break
+    pool.close()
+    while futures:
+        timed_out_futures = []
+        for future in futures:
+            try:
+                future.get(180)
+                g_processed_files.append(future.filename)
+                g_bytes_xfer += future.size
+            except multiprocessing.TimeoutError:
+                logging.warning("Timed out when waiting for file %s; will retry later." % future.filename)
+                #timed_out_futures.append(future)
+            except Exception as e:
+                logging.error("Failure when trying to checksum %s (size %d); will regenerate.  Exception: %s" % (future.filename, future.size, str(e)))
+                g_failed_files.append(gridftp_base_url + "/" + future.filename)
+        futures = timed_out_futures
+    logging.info("All jobs processed - closing up pool.")
+    pool.join()
 
-    # Process in parallel.
-    try:
-        for filename, fp in worklist:
-            input_url = base_url + filename
-            output_filename = output_dir + filename
-            if current == count:
-                status = os.wait()[1]
-                current -= 1
-                if status:
-                    print "Failed to process file; graft creation exited with error", status
-            print "Processing file %s -> %s" % (input_url, output_filename)
-            kickoff_graft(fp, input_url, output_filename)
-            current += 1
-    finally:
-        # Process tails - must do this before exceptions are propagated as we
-        # may deadlock if there are callbacks while we destroy the open file
-        # handles.
-        while current:
-            status = os.wait()[1]
-            current -= 1
-            if status:
-                print "Failed to process file; graft creation exited with error", status
-        worklist = []
-        # It's not possible to solve the race condition inherent here - we have no
-        # way to notify the main thread the callback pool is done without holding
-        # the GIL.  So, we do this any pray.
-        time.sleep(0.1)
+
+def list_dir(work_queue, results_queue, fs):
+    """
+    Helper thread for listing directories in parallel
+    """
+    while True:
+        cwd = work_queue.get()
+        logging.debug("%s working on directory listing of %s" % (threading.current_thread().name, cwd))
+        starttime = time.time()
+        status = None
+        dirlist = None
+        try:
+            status, dirlist = fs.dirlist(cwd,
+                                        flags=XRootD.client.flags.DirListFlags.STAT)
+        except Exception as e:
+            logging.error("Exception encoutered when listing directory %s: %s" % (cwd, str(e)))
+        finally:
+            results_queue.put((status, dirlist, cwd, starttime), True)
+            work_queue.task_done()
 
 
-def process_dir(base_url, directory, ignore=None):
+def start_listing_workers(thread_count, work_queue, results_queue, fs):
+    """
+    Helper function for launching the directory spider threads
+    """
+    for count in range(thread_count):
+        t = threading.Thread(target=list_dir, args=(work_queue, results_queue, fs), name="Directory list worker %d" % count)
+        t.setDaemon(True)
+        t.start()
+
+
+def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_count=2):
     fs = XRootD.client.FileSystem(base_url)
     worklist = [directory]
-    filelist = []
     base_len = len(directory)
-    while worklist:
-        cwd = worklist.pop()
-        print "Processing", cwd
-        signal.alarm(300)
-        status, dirlist = fs.dirlist("/" + cwd,
-                                    flags=XRootD.client.flags.DirListFlags.STAT)
+
+    # Create our input / output queues for helper threads
+    work_queue = Queue.Queue(maxsize=thread_count)
+    work_sent = 0
+    results_queue = Queue.Queue() # shouldn't block
+    results_received = 0
+    start_listing_workers(thread_count, work_queue, results_queue, fs)
+
+    while worklist or (work_sent != results_received):
+
+        # Try to make sure there is sufficient work for the queues.
+        while worklist and not work_queue.full():
+            cwd = worklist.pop()
+
+            # Ugly hack for OSG -- not clear how to clean this up.
+            if include and include[0] == '/user/*/public/*':
+                full_cwd = full_norm_path(cwd)
+                pathcount = len(full_cwd.split("/"))
+                if full_cwd.startswith("/user") and pathcount == 3:
+                    logging.debug("OSG stash: skipping private directory %s" % full_cwd)
+                    cwd += "/public"
+
+            cwd = os.path.normpath(cwd)
+            logging.debug("Queueing %s for processing" % cwd)
+            work_sent += 1
+            work_queue.put(cwd, block=True)
+
+        # Process results serially.
+        status, dirlist, cwd, starttime = results_queue.get(True)
+        logging.info("Processing entries of %s" % cwd)
+        results_queue.task_done()
+        results_received += 1
         if status.status:
-            print "Failed to list directory", cwd, "skipping"
-            print status
+            logging.warning("Failed to list directory (%s) skipping: %s" % (cwd, status))
             continue
-        for entry in dirlist.dirlist:
+
+        xrootd_cwd_names = set()
+        entries = list(dirlist.dirlist)
+        logging.debug("Directory %s has %d entries" % (cwd, len(entries)))
+        random.shuffle(entries)
+        for entry in entries:
+            if should_ignore_path(cwd + "/" + entry.name, ignore, include):
+                continue
+            # Sometimes the remote XRootD will prefix the name with '/'
+            xrootd_cwd_names.add(entry.name.split("/")[-1])
             if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
                 worklist.append(cwd + "/" + entry.name)
-            elif not ignore:
-                fname = cwd + "/" + entry.name
-                filelist.append((fname[base_len:], entry.statinfo.size))
             else:
-                should_ignore = False
-                for ignore_rule in ignore.split(","):
-                     if fnmatch.fnmatch(entry.name, ignore_rule):
-                         should_ignore = True
-                         break
-                if not should_ignore:
-                    fname = cwd + "/" + entry.name
-                    filelist.append((fname[base_len:], entry.statinfo.size))
-    return filelist
-
+                fname = cwd + "/" + entry.name
+                yield (fname[base_len:], entry.statinfo.size)
+        cwd_output = output_dir + "/" + cwd[len(directory):]
+        try:
+            cwd_output_names = set(os.listdir(cwd_output))
+        except OSError as oe:
+            if oe.errno == errno.ENOENT:
+                logging.info("Destination directory (%s) does not exist; not checking for removal candidates." % cwd_output)
+                continue
+        remaining_names = cwd_output_names.difference(xrootd_cwd_names)
+        for name in remaining_names:
+            # Ignore presence of hidden files (such as the graft files).
+            if name.startswith("."): continue
+            fname = os.path.join(cwd_output, name)
+            logging.info("Candidate for removal: %s" % fname)
+            try:
+                os.unlink(fname)
+            except OSError as oe:
+                if oe.errno == errno.EISDIR:
+                    logging.info("Removing entire subdirectory.")
+                    shutil.rmtree(fname, True) # Remove directory tree, ignoring errors.
+                else:
+                    logging.warning("Failed to remove file %s: %s" % (fname, str(oe)))
+        # I'd like to record the last visit for each subdirectory - but this triggers a lot
+        # of churn in the catalogs, even when there's no actual changes.  Perhaps in the future,
+        # we could just record changes.
+        #xattr.setxattr(cwd_output, "user.last_visit", str(int(starttime)))
 
 def main():
     opts, args = parse_opts()
@@ -220,18 +418,26 @@ def main():
     concurrency = opts.concurrency
     starttime = time.time()
 
+    if opts.max_time > 0:
+        deadline = opts.max_time*60 + starttime
+    else:
+        deadline = starttime + 86400*7
+
     for src in srcs:
+        if time.time() > deadline:
+            break
         source_filelist = []
-        src_parsed = urlparse.urlparse(src)
-        base_url = src_parsed.scheme + "://" + src_parsed.netloc
-        directory = src_parsed.path
-        filelist = process_dir(base_url, directory, ignore=opts.ignore)
-        print "Found %d files to process" % len(filelist)
-        process_files(filelist, src, dest, concurrency)
+        info = src.split(",")
+        gridftp_src = ''
+        if len(info) == 2:
+            src, gridftp_src = info
+        process_files(src, gridftp_src, dest, concurrency, ignore=opts.ignore, include=opts.include, thread_count=opts.metadata_concurrency, deadline=deadline)
 
     processing_time = time.time() - starttime
-    print "Total of %d bytes processed in %.2f seconds." % (g_bytes_xfer, processing_time)
-    print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
+    print "Total of %.1f GB in %d files processed in %.2f seconds." % (g_bytes_xfer/(1024.**3), len(g_processed_files), processing_time)
+    print "%d file checksums were skipped because they already exist locally." % g_skip_count
+    # Processing rate is not sensible as we don't know if this is a "new" checksum.
+    #print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
 
     if not opts.failed:
         if g_failed_files:
