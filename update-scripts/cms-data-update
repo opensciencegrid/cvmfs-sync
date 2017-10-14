@@ -37,26 +37,22 @@ pub_failed=0
 export X509_USER_PROXY=$PWD/cms_credential
 pushd ~
 
-cvmfs_sync root://red-gridftp12.unl.edu//store/relval/,\
-           gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/relval/ \
+cvmfs_sync root://red-gridftp12.unl.edu//store/relval/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/relval/ \
            /cvmfs/cms.osgstorage.org/store/relval/ \
            --concurrency 180 \
            --ignore '*RemoteStageOutTest*'
 
-cvmfs_sync root://red-gridftp12.unl.edu//store/mc/,\
-           gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/mc/ \
+cvmfs_sync root://red-gridftp12.unl.edu//store/mc/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/mc/ \
            /cvmfs/cms.osgstorage.org/store/mc/ \
            --concurrency 180 \
            --ignore '*RemoteStageOutTest*'
 
-cvmfs_sync root://red-gridftp12.unl.edu//store/data/,\
-           gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/data/ \
+cvmfs_sync root://red-gridftp12.unl.edu//store/data/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/data/ \
            /cvmfs/cms.osgstorage.org/store/data/ \
            --concurrency 180 \
            --ignore '*RemoteStageOutTest*'
 
-cvmfs_sync root://red-gridftp12.unl.edu//store/user/,\
-           gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/user/ \
+cvmfs_sync root://red-gridftp12.unl.edu//store/user/,gsiftp://red-gridftp.unl.edu//user/uscms01/pnfs/unl.edu/data4/cms/store/user/ \
            /cvmfs/cms.osgstorage.org/store/user/ \
            --concurrency 180 \
            --ignore '*RemoteStageOutTest*'
