@@ -405,7 +405,10 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
                     shutil.rmtree(fname, True) # Remove directory tree, ignoring errors.
                 else:
                     logging.warning("Failed to remove file %s: %s" % (fname, str(oe)))
-        xattr.setxattr(cwd_output, "user.last_visit", str(int(starttime)))
+        # I'd like to record the last visit for each subdirectory - but this triggers a lot
+        # of churn in the catalogs, even when there's no actual changes.  Perhaps in the future,
+        # we could just record changes.
+        #xattr.setxattr(cwd_output, "user.last_visit", str(int(starttime)))
 
 def main():
     opts, args = parse_opts()
