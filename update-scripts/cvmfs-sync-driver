@@ -1,0 +1,259 @@
+#!/usr/bin/python
+
+"""
+Driver script for updating a CVMFS repository with external files using the
+cvmfs_sync script
+"""
+
+import os
+import re
+import time
+import logging
+import argparse
+import tempfile
+import subprocess
+import ConfigParser
+
+
+def cvmfs_abort(repo_name):
+    """
+    Abort the in-process publication attempt of a given repository.
+    """
+    return subprocess.check_call(["cvmfs_server", "abort", "-f", repo_name])
+
+
+def cvmfs_start(repo_name):
+    """
+    Start a new transaction in a given repository.
+    """
+    return subprocess.check_call(["cvmfs_server", "transaction", repo_name])
+
+
+class CvmfsSyncDriver(object):
+    """
+    Manage a single invocation of cvmfs-sync
+    """
+
+    def __init__(self, config, section):
+        self.log = logging.getLogger("sync.%s" % section[5:].lower())
+        self.concurrency = None
+        if config.has_option(section, "concurrency"):
+            self.concurrency = config.getint(section, "concurrency")
+        self.metadata_concurrency = None
+        if config.has_option(section, "metadata_concurrency"):
+            self.metadata_concurrency = config.getint(section, "metadata_concurrency")
+        self.max_time = None
+        if config.has_option(section, "max_time"):
+            self.max_time = config.getint(section, "max_time")
+        self.ignore = []
+        if config.has_option(section, "ignore"):
+            self.ignore = re.split(r",?\s*", config.get(section, "ignore"))
+        self.include = []
+        if config.has_option(section, "include"):
+            self.include = re.split(r",?\s*", config.get(section, "include"))
+        self.source = config.get(section, "source")
+        self.gridftp_source = None
+        if config.has_option(section, "gridftp_source"):
+            self.gridftp_source = config.get(section, "gridftp_source")
+        self.destination = config.get(section, "destination")
+
+    def run(self):
+        """
+        Invoke cvmfs_sync process.
+        """
+        command = ["/usr/libexec/cvmfs-sync/cvmfs_sync"]
+        if self.concurrency is not None:
+            command += ["--concurrency", str(self.concurrency)]
+        if self.metadata_concurrency is not None:
+            command += ["--metadata-concurrency", str(self.metadata_concurrency)]
+        if self.max_time is not None:
+            command += ["--max-time", str(self.max_time)]
+        if self.ignore:
+            command += ["--ignore", ",".join(self.ignore)]
+        if self.include:
+            command += ["--include", ",".join(self.include)]
+        source = self.source
+        if self.gridftp_source:
+            source += "," + self.gridftp_source
+        command += [source, self.destination]
+        process = subprocess.Popen(command)
+        process.wait()
+        return process.returncode
+
+
+class CvmfsPublicationDriver(object):
+    """
+    Class for driving a cvmfs-sync invocation.
+    """
+
+    def __init__(self, config):
+        self.repo = config.get("CVMFS", "repo")
+        self.authz_file = None
+        self.authz_tempfile = None  # Handle for the tempfile associated with this publication.
+        self.authz_command = None
+        self.voms_fqan = None
+        self.log = logging.getLogger("publication")
+        self.x509_min_lifetime_hrs = 6
+        self.config = config
+
+    def setup_authz(self):
+        """
+        Determine and/or create the authz file for this run
+        """
+        if not self.config.has_section("Authorization"):
+            return
+
+        # The X509 credential we should use for the cvmfs-sync process.
+        if self.config.has_option("Authorization", "x509_credential"):
+            os.environ['X509_USER_PROXY'] = self.config.get("Authorization", "x509_credential")
+
+        # The VOMS extension to use for a renewal
+        if self.config.has_option("Authorization", "voms_fqan"):
+            self.voms_fqan = self.config.get("Authorization", "voms_fqan")
+
+        # The CVMFS authorization file is a flat file.
+        if self.config.has_option("Authorization", "file"):
+            self.authz_file = self.config.get("Authorization", "file")
+
+        # Dynamically generate the CVMFS authorization file from a subprocess's output.
+        if self.config.has_option("Authorization", "command"):
+            self.authz_tempfile = tempfile.NamedTemporaryFile(delete=True)
+            command = self.config.get("Authorization", "command")
+            command = command.format(authz_output=self.authz_tempfile.name)
+            subprocess.check_call(command, shell=True)
+            self.authz_file = self.authz_tempfile.name
+
+    def setup_x509_credential(self):
+        """
+        As necessary, put together an update for the X509 credential.
+        """
+        if not self.config.has_section("Authorization"):
+            return
+
+        try:
+            subprocess.check_call(["voms-proxy-info", "--exists", "--valid",
+                                   "%d:0" % self.x509_min_lifetime_hrs])
+            if self.voms_fqan:
+                actimeleft = subprocess.check_output(["voms-proxy-info", "-actimeleft"])
+                if int(actimeleft) > self.x509_min_lifetime_hrs*3600:
+                    return
+            else:
+                return
+        except subprocess.CalledProcessError:
+            self.log.warning("X509 credential creation failed for repo %s", self.repo)
+
+        # If we're here, then the credential should be renewed.
+        renew_command = ["voms-proxy-init", "-valid", "168:00"]
+        if self.voms_fqan:
+            renew_command += ["-voms", self.voms_fqan]
+        subprocess.check_call(renew_command)
+
+    def garbage_collection(self):
+        """
+        If sufficient time has passed since the last GC run, then run it now.
+        """
+        gc_dir = "/var/cache/cvmfs-sync"
+        if self.config.has_option("CVMFS", "cache_directory"):
+            gc_dir = self.config.get("CVMFS", "cache_directory")
+        gc_file = os.path.join(gc_dir, "%s.last_gc" % self.repo)
+        now = int(time.time())
+        gc_interval_mins = 48*60
+        if self.config.has_option("CVMFS", "gc_interval_mins"):
+            gc_interval_mins = self.config.getint("CVMFS", "gc_interval_mins")
+        should_gc = True
+        last_gc_time = 0
+        try:
+            with open(gc_file, "r+") as fp:
+                gc_time_str = fp.read()
+                try:
+                    last_gc_time = int(gc_time_str)
+                except ValueError:
+                    last_gc_time = 0
+                if now - last_gc_time < gc_interval_mins*60:
+                    should_gc = False
+                fp.seek(0)
+                fp.truncate()
+                fp.write(str(now))
+        except IOError:
+            with open(gc_file, "wx") as fp:
+                fp.write(str(last_gc_time))
+        if should_gc:
+            self.log.info("Attempting to garbage collect %s", self.repo)
+            try:
+                subprocess.call(["cvmfs_server", "gc", "-f", self.repo])
+            except subprocess.CalledProcessError:
+                self.log.warning("Garbage collection of %s failed.", self.repo)
+
+    def run(self):
+        """
+        Examine the configuration object and setup the driver appropriately.
+        """
+        self.log.info("Attempting to abort any pre-existing transaction for %s", self.repo)
+        try:
+            cvmfs_abort(self.repo)
+        except subprocess.CalledProcessError:
+            pass  # Ignore; there probably wasn't a transaction anyway.
+        self.garbage_collection()
+
+        self.log.info("Starting publication run for %s", self.repo)
+        self.setup_authz()
+        self.setup_x509_credential()
+
+        self.start_transaction()
+        try:
+            for section in self.config.sections():
+                if section.lower().startswith("sync "):
+                    self.log.info("Starting synchronization job %s", section[5:])
+                    sync = CvmfsSyncDriver(self.config, section)
+                    sync.run()
+        except:
+            self.log.error("Publication failed!  Aborting publication.")
+            cvmfs_abort(self.repo)
+            raise
+        self.commit()
+
+    def start_transaction(self):
+        """
+        Start a transaction for the repo associated with this driver.
+        """
+        self.log.info("Starting transaction for %s", self.repo)
+        cvmfs_start(self.repo)
+
+    def commit(self):
+        """
+        Commit the current transaction.
+        """
+        command = ["cvmfs_server", "publish", "-X"]
+        if self.authz_file:
+            command += ["-F", self.authz_file]
+        command += [self.repo]
+        self.log.info("Starting commit process for %s: %s", self.repo, " ".join(command))
+        subprocess.check_call(command)
+        self.log.info("Commit finished for %s", self.repo)
+
+
+def main():
+    """
+    Primary driver of this binary.  Parse arguments and invoke the driver class.
+    """
+    parser = argparse.ArgumentParser(description="Publish to CVMFS using cvmfs-sync")
+    parser.add_argument("--config", dest="config", required=True, metavar="CONFIG",
+                        help="Configuration filename for cvmfs-sync driver.")
+    parser.add_argument("--verbose", dest="verbose", action="store_true", default=False,
+                        help="Increase verbosity of script")
+    args = parser.parse_args()
+
+    if args.verbose:
+        logging.basicConfig(level=logging.DEBUG, format="%(levelname)-8s: %(message)s")
+    else:
+        logging.basicConfig(level=logging.INFO, format="%(levelname)-8s: %(message)s")
+
+    cp = ConfigParser.ConfigParser()
+    with open(args.config) as fp:
+        cp.readfp(fp)
+
+    driver = CvmfsPublicationDriver(cp)
+    driver.run()
+
+if __name__ == '__main__':
+    main()

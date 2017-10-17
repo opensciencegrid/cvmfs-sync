@@ -1,0 +1,18 @@
+
+[Unit]
+Description=%i repo update
+After=network.target cvmfs-%i.mount
+Wants=network.target cvmfs-%i.mount
+
+[Service]
+ExecStart=/usr/libexec/cvmfs-sync/cvmfs-sync-driver --config /etc/cvmfs-sync/%i.config
+WorkingDirectory=/var/lib/cvmfs-sync
+RestartSec=15min
+Restart=always
+User=cvmfs-sync
+Nice=19
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
+

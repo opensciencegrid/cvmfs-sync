@@ -332,6 +332,7 @@ def start_listing_workers(thread_count, work_queue, results_queue, fs):
 
 def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_count=2):
     fs = XRootD.client.FileSystem(base_url)
+    logging.info("Starting processing of top-level directory %s", directory)
     worklist = [directory]
     base_len = len(directory)
 
@@ -391,6 +392,8 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
             if oe.errno == errno.ENOENT:
                 logging.info("Destination directory (%s) does not exist; not checking for removal candidates." % cwd_output)
                 continue
+            else:
+                raise
         remaining_names = cwd_output_names.difference(xrootd_cwd_names)
         for name in remaining_names:
             # Ignore presence of hidden files (such as the graft files).
