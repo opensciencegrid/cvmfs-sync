@@ -36,6 +36,7 @@ install -d $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync
 #install -m 0755 update-scripts/* $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/
 install -m 0755 bin/cvmfs_sync $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/cvmfs_sync
 install -m 0755 bin/ligo-auth-gen $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/ligo-auth-gen
+install -m 0755 update-scripts/cvmfs-sync-driver $RPM_BUILD_ROOT/%{_libexecdir}/cvmfs-sync/cvmfs-sync-driver
 
 # Install the SystemD unit files
 install -d $RPM_BUILD_ROOT/%{_unitdir}
@@ -76,6 +77,7 @@ exit 0
 %files
 %dir %{_libexecdir}/%{name}
 %{_libexecdir}/%{name}/cvmfs_sync
+%{_libexecdir}/%{name}/ligo-auth-gen
 %{_libexecdir}/%{name}/cvmfs-sync-driver
 %dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_datarootdir}/%{name}
 %dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_localstatedir}/cache/%{name}
