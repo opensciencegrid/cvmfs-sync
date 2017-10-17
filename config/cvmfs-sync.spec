@@ -49,6 +49,9 @@ install -m 0644 config/ligo_authz config/cms_authz $RPM_BUILD_ROOT/%{_datarootdi
 install -d $RPM_BUILD_ROOT/%{_sysconfdir}/cvmfs-sync
 install -m 0644 config/*.config $RPM_BUILD_ROOT/%{_sysconfdir}/cvmfs-sync/
 
+# Make sure the cache directory is pre-created.
+install -d $RPM_BUILD_ROOT/%{_localstatedir}/cache/cvmfs-sync
+
 %pre
 # Install the cvmfs-sync user
 getent group cvmfs-sync >/dev/null || groupadd -r cvmfs-sync
@@ -71,13 +74,15 @@ exit 0
 
 
 %files
-%dir %{_libexecdir}/cvmfs-sync
-%{_libexecdir}/cvmfs-sync/cvmfs_sync
-%{_libexecdir}/cvmfs-sync/cvmfs-sync-driver
-%dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_datarootdir}/cvmfs-sync
-%{_datarootdir}/cvmfs-sync/cms_authz
-%{_datarootdir}/cvmfs-sync/ligo_authz
+%dir %{_libexecdir}/%{name}
+%{_libexecdir}/%{name}/cvmfs_sync
+%{_libexecdir}/%{name}/cvmfs-sync-driver
+%dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_datarootdir}/%{name}
+%dir %attr(0755, cvmfs-sync, cvmfs-sync) %{_localstatedir}/cache/%{name}
+%{_datarootdir}/%{name}/cms_authz
+%{_datarootdir}/%{name}/ligo_authz
 %{_unitdir}/cvmfs-data-update@.service
+%dir %{_sysconfdir}/%{name}
 %(config,noreplace) %{_sysconfdir}/%{name}/cms.osgstorage.org.config
 %(config,noreplace) %{_sysconfdir}/%{name}/des.osgstorage.org.config
 %(config,noreplace) %{_sysconfdir}/%{name}/ligo.osgstorage.org.config

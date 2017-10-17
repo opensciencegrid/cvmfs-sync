@@ -61,7 +61,7 @@ class CvmfsSyncDriver(object):
         """
         Invoke cvmfs_sync process.
         """
-        command = ["cvmfs_sync"]
+        command = ["/usr/libexec/cvmfs-sync/cvmfs_sync"]
         if self.concurrency is not None:
             command += ["--concurrency", str(self.concurrency)]
         if self.metadata_concurrency is not None:
@@ -127,6 +127,9 @@ class CvmfsPublicationDriver(object):
         """
         As necessary, put together an update for the X509 credential.
         """
+        if not self.config.has_section("Authorization"):
+            return
+
         try:
             subprocess.check_call(["voms-proxy-info", "--exists", "--valid",
                                    "%d:0" % self.x509_min_lifetime_hrs])
