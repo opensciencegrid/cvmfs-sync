@@ -42,6 +42,7 @@ cvmfs_sync \
     --max-time 600 \
     --ignore '*.swp' \
     --include '/user/*/public/*' \
+    --ignore '/user/*/public/public' \
     root://stash.osgconnect.net//user/ \
     /cvmfs/stash.osgstorage.org/user/
 
