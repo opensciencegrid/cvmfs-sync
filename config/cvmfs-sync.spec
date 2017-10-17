@@ -1,5 +1,5 @@
 Name:           cvmfs-sync
-Version:        2.2
+Version:        3.0
 Release:        1%{?dist}
 Summary:        CVMFS Sync
 
@@ -83,18 +83,21 @@ exit 0
 %{_datarootdir}/%{name}/ligo_authz
 %{_unitdir}/cvmfs-data-update@.service
 %dir %{_sysconfdir}/%{name}
-%(config,noreplace) %{_sysconfdir}/%{name}/cms.osgstorage.org.config
-%(config,noreplace) %{_sysconfdir}/%{name}/des.osgstorage.org.config
-%(config,noreplace) %{_sysconfdir}/%{name}/ligo.osgstorage.org.config
-%(config,noreplace) %{_sysconfdir}/%{name}/mu2e.osgstorage.org.config
-%(config,noreplace) %{_sysconfdir}/%{name}/nova.osgstorage.org.config
-%(config,noreplace) %{_sysconfdir}/%{name}/stash.osgstorage.org.config
-%(config,noreplace) %{_sysconfdir}/%{name}/uboone.osgstorage.org.config
+%config(noreplace) %{_sysconfdir}/%{name}/cms.osgstorage.org.config
+%config(noreplace) %{_sysconfdir}/%{name}/des.osgstorage.org.config
+%config(noreplace) %{_sysconfdir}/%{name}/ligo.osgstorage.org.config
+%config(noreplace) %{_sysconfdir}/%{name}/mu2e.osgstorage.org.config
+%config(noreplace) %{_sysconfdir}/%{name}/nova.osgstorage.org.config
+%config(noreplace) %{_sysconfdir}/%{name}/stash.osgstorage.org.config
+%config(noreplace) %{_sysconfdir}/%{name}/uboone.osgstorage.org.config
 
 %doc
 
 
 %changelog
+* Tue Oct 17 2017 Brian Bockelman - 3.0-1
+- Complete overhaul of driver scripts for cvmfs-sync repos.
+
 * Sat Oct 14 2017 Brian Bockelman - 2.2-1
 - Unify all data update scripts to use cvmfs_sync.
 
