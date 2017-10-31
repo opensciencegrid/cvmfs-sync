@@ -157,7 +157,7 @@ class CvmfsPublicationDriver(object):
             gc_dir = self.config.get("CVMFS", "cache_directory")
         gc_file = os.path.join(gc_dir, "%s.last_gc" % self.repo)
         now = int(time.time())
-        gc_interval_mins = 48*60
+        gc_interval_mins = 24*60
         if self.config.has_option("CVMFS", "gc_interval_mins"):
             gc_interval_mins = self.config.getint("CVMFS", "gc_interval_mins")
         should_gc = True
@@ -171,16 +171,17 @@ class CvmfsPublicationDriver(object):
                     last_gc_time = 0
                 if now - last_gc_time < gc_interval_mins*60:
                     should_gc = False
-                fp.seek(0)
-                fp.truncate()
-                fp.write(str(now))
+                else:
+                    fp.seek(0)
+                    fp.truncate()
+                    fp.write(str(now))
         except IOError:
             with open(gc_file, "wx") as fp:
                 fp.write(str(last_gc_time))
         if should_gc:
             self.log.info("Attempting to garbage collect %s", self.repo)
             try:
-                subprocess.call(["cvmfs_server", "gc", "-f", self.repo])
+                subprocess.call(["cvmfs_server", "gc", "-f", "-t", "2 days ago", self.repo])
             except subprocess.CalledProcessError:
                 self.log.warning("Garbage collection of %s failed.", self.repo)
 
