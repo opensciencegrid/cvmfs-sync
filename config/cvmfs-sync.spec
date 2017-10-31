@@ -1,5 +1,5 @@
 Name:           cvmfs-sync
-Version:        3.0
+Version:        3.2
 Release:        1%{?dist}
 Summary:        CVMFS Sync
 
@@ -97,6 +97,12 @@ exit 0
 
 
 %changelog
+* Tue Oct 31 2017 Brian Bockelman - 3.2-1
+- Fix automated periodic GC runs.
+
+* Tue Oct 17 2017 Brian Bockelman - 3.1-1
+- Fixup various config file typos.
+
 * Tue Oct 17 2017 Brian Bockelman - 3.0-1
 - Complete overhaul of driver scripts for cvmfs-sync repos.
 
