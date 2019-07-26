@@ -198,8 +198,13 @@ class CvmfsPublicationDriver(object):
 
         self.log.info("Starting publication run for %s", self.repo)
         self.setup_authz()
-        self.setup_x509_credential()
-
+        
+        """
+        Skip setup_x509_credential() if authz_file is set
+        """
+        if self.authz_file is None:
+            self.setup_x509_credential()
+       
         self.start_transaction()
         try:
             for section in self.config.sections():
