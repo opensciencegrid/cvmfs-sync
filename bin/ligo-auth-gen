@@ -9,7 +9,7 @@ import optparse
 
 def parse_opts():
     parser = optparse.OptionParser(usage="%prog [option] [output_file]")
-    parser.add_option("-u", "--url", dest="url", help="LDAP server URL", default="ldap://ldap.ligo.org")
+    parser.add_option("-u", "--url", dest="url", help="LDAP server URL", default="ldaps://ldap.ligo.org")
     parser.add_option("-b", "--base", dest="base", help="LDAP server base tree", default="ou=people,dc=ligo,dc=org")
     parser.add_option("-g", "--group", dest="group", help="Authorized group name", default="Communities:LSCVirgoLIGOGroupMembers")
     parser.add_option("-w", "--whitelist", dest="whitelist", help="Whitelist filename")
