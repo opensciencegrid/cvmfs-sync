@@ -1,0 +1,12 @@
+[Unit]
+Description=Hourly cadist update for repo servers
+After=syslog.target network.target
+Wants=network.target
+
+[Timer]
+OnActiveSec=0s
+OnUnitActiveSec=15m
+RandomizedDelaySec=1m
+
+[Install]
+WantedBy=timers.target
