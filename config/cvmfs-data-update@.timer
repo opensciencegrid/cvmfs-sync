@@ -1,5 +1,5 @@
 [Unit]
-Description=Hourly cadist update for repo servers
+Description=Restart cvmfs-data-update every 15 minutes
 After=syslog.target network.target
 Wants=network.target
 
