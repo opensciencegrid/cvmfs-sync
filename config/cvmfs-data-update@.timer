@@ -1,5 +1,5 @@
 [Unit]
-Description=Restart cvmfs-data-update every 15 minutes
+Description=Restart cvmfs-data-update@%i every 15 minutes
 After=syslog.target network.target
 Wants=network.target
 
