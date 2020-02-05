@@ -21,7 +21,7 @@ def main():
     opts, args = parse_opts()
     ldap_obj = ldap.initialize(opts.url)
     query = "(&(isMemberOf=%s)(gridX509subject=*))" % opts.group
-    results = ldap_obj.search_s(opts.base, ldap.SCOPE_ONELEVEL, query, ["gridX509subject"])
+    results = ldap_obj.search_s(opts.base, ldap.SCOPE_SUBTREE, query, ["gridX509subject"])
     all_dns = []
     for result in results:
         user_dns = result[1].get('gridX509subject', [])
