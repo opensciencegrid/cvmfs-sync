@@ -4,42 +4,50 @@ import os
 import sys
 import ldap
 import tempfile
-import optparse
+import argparse
 
 
 def parse_opts():
-    parser = optparse.OptionParser(usage="%prog [option] [output_file]")
-    parser.add_option("-u", "--url", dest="url", help="LDAP server URL", default="ldaps://ldap.ligo.org")
-    parser.add_option("-b", "--base", dest="base", help="LDAP server base tree", default="ou=people,dc=ligo,dc=org")
-    parser.add_option("-g", "--group", dest="group", help="Authorized group name", default="Communities:LSCVirgoLIGOGroupMembers")
-    parser.add_option("-w", "--whitelist", dest="whitelist", help="Whitelist filename")
+    parser = argparse.ArgumentParser(description="Generate ligo authorization file")
+    parser.add_argument("-u", "--url", dest="url", help="LDAP server URL", default="ldaps://ldap.ligo.org")
+    parser.add_argument("-b", "--base", dest="base", action='append', help="LDAP server base tree", default=["ou=people,dc=ligo,dc=org", "ou=robot,dc=ligo,dc=org"])
+    parser.add_argument("-g", "--group", dest="group", action='append', help="Authorized group name", default=["Communities:LSCVirgoLIGOGroupMembers", "Communities:robot:OSGRobotCert"])
+    parser.add_argument("-w", "--whitelist", dest="whitelist", help="Whitelist filename")
+    parser.add_argument("output_file", help='Output File')
 
     return parser.parse_args()
 
 
 def main():
-    opts, args = parse_opts()
+    opts = parse_opts()
     ldap_obj = ldap.initialize(opts.url)
-    query = "(&(isMemberOf=%s)(gridX509subject=*))" % opts.group
-    results = ldap_obj.search_s(opts.base, ldap.SCOPE_SUBTREE, query, ["gridX509subject"])
+    if len(opts.group) != len(opts.base):
+        raise ValueError("Number of groups ({}) is not equal to number of base ({}) arguments".format(len(opts.group), len(opts.base)))
+
     all_dns = []
-    for result in results:
-        user_dns = result[1].get('gridX509subject', [])
-        all_dns += [i.replace("\n", " ") for i in user_dns if i.startswith("/")]
+    for i in range(len(opts.group)):
+        print("Querying {} and {}".format(opts.group[i], opts.base[i]))
+        query = "(&(isMemberOf=%s)(gridX509subject=*))" % opts.group[i]
+        results = ldap_obj.search_s(opts.base[i], ldap.SCOPE_SUBTREE, query, ["gridX509subject"])
+        for result in results:
+            user_dns = result[1].get('gridX509subject', [])
+            all_dns += [i.decode('utf-8').replace("\n", " ") for i in user_dns if i.decode('utf-8').startswith("/")]
 
     if opts.whitelist:
         for entry in open(opts.whitelist):
             all_dns.append(entry.strip())
 
-    if args:
-        dir, fname = os.path.split(args[0])
+    if opts.output_file:
+        dir, fname = os.path.split(opts.output_file)
         fd, name = tempfile.mkstemp(prefix=fname, dir=dir)
-        os.write(fd, "x509%\n" + "\n".join(all_dns) + "\n")
+        os.write(fd, b"x509%\n")
+        dns = "\n".join(all_dns)
+        os.write(fd, dns.encode() + b"\n")
         os.close(fd)
-        os.rename(name, args[0])
+        os.rename(name, opts.output_file)
     else:
         for dn in all_dns:
-            print dn
+            print(dn)
 
 
 if __name__ == '__main__':
