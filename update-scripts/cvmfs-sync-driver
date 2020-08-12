@@ -5,6 +5,7 @@ Driver script for updating a CVMFS repository with external files using the
 cvmfs_sync script
 """
 
+import sys
 import os
 import re
 import time
@@ -72,6 +73,7 @@ class CvmfsSyncDriver(object):
             command += ["--ignore", ",".join(self.ignore)]
         if self.include:
             command += ["--include", ",".join(self.include)]
+        command += ["--verbose"]
         source = self.source
         if self.gridftp_source:
             source += "," + self.gridftp_source
@@ -198,25 +200,27 @@ class CvmfsPublicationDriver(object):
 
         self.log.info("Starting publication run for %s", self.repo)
         self.setup_authz()
-        
-        """
-        Skip setup_x509_credential() if authz_file is set
-        """
-        if self.authz_file is None:
+	"""
+	Skip setup_x509_credential() if authz_file is set
+	"""
+	if self.authz_file is None:
             self.setup_x509_credential()
-       
+
         self.start_transaction()
+        retval = 0
         try:
             for section in self.config.sections():
                 if section.lower().startswith("sync "):
                     self.log.info("Starting synchronization job %s", section[5:])
                     sync = CvmfsSyncDriver(self.config, section)
-                    sync.run()
+                    retval += sync.run()
         except:
             self.log.error("Publication failed!  Aborting publication.")
             cvmfs_abort(self.repo)
             raise
         self.commit()
+        if retval > 0:             
+            return 1
 
     def start_transaction(self):
         """
@@ -234,7 +238,11 @@ class CvmfsPublicationDriver(object):
             command += ["-F", self.authz_file]
         command += [self.repo]
         self.log.info("Starting commit process for %s: %s", self.repo, " ".join(command))
-        subprocess.check_call(command)
+        try:
+            subprocess.check_output(command, stderr=subprocess.STDOUT)
+        except subprocess.CalledProcessError as cpe:
+            print cpe
+            print cpe.output
         self.log.info("Commit finished for %s", self.repo)
 
 
@@ -259,7 +267,7 @@ def main():
         cp.readfp(fp)
 
     driver = CvmfsPublicationDriver(cp)
-    driver.run()
+    return(driver.run())
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())
