@@ -33,6 +33,7 @@ g_processed_files = []
 g_bytes_xfer = 0
 g_skip_count = 0
 g_failed_dirs = []
+g_failure_reasons = []
 
 def full_norm_path(path):
     path = os.path.normpath(path)
@@ -100,6 +101,7 @@ def should_ignore_path(entry_name, ignore, include):
              return True
     return False
 
+
 def graft_filename(filename):
     parent_dir, fname = os.path.split(filename)
     return os.path.join(parent_dir, ".cvmfsgraft-" + fname)
@@ -145,6 +147,7 @@ def should_skip(input_url, output_filename, size):
         if oe.errno != errno.EEXIST:
             raise
     return False
+
 
 def process_download_file(xrootd_url, output_filename, deadline):
     """
@@ -206,6 +209,7 @@ def process_download_file(xrootd_url, output_filename, deadline):
             next_offset += len(response)
     return next_offset
 
+
 def process_checksum_file(gridftp_url, xrootd_url, output_filename, deadline):
     """
     Process and create a CVMFS checksum / graft file.
@@ -266,8 +270,8 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
         if deadline and (time.time() > deadline):
             logging.error("Passed deadline when scanning directory tree")
             break
-        if len(futures) >= 50000:
-        #if len(futures) >= 50:
+        #if len(futures) >= 50000:
+        if len(futures) >= 200:
             logging.info("Queue of 50k files to checksum has been reached; will attempt remainder next time.")
             break
         if gridftp_base_url:
@@ -289,7 +293,7 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
         timed_out_futures = []
         for future in futures:
             try:
-                future.get(180)
+                future.get(300)
                 g_processed_files.append(future.filename)
                 g_bytes_xfer += future.size
             except multiprocessing.TimeoutError:
@@ -302,7 +306,7 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
     logging.info("All jobs processed - closing up pool.")
     pool.join()
 
-
+    
 def list_dir(work_queue, results_queue, fs):
     """
     Helper thread for listing directories in parallel
@@ -322,7 +326,7 @@ def list_dir(work_queue, results_queue, fs):
             results_queue.put((status, dirlist, cwd, starttime), True)
             work_queue.task_done()
 
-
+            
 def start_listing_workers(thread_count, work_queue, results_queue, fs):
     """
     Helper function for launching the directory spider threads
@@ -332,13 +336,14 @@ def start_listing_workers(thread_count, work_queue, results_queue, fs):
         t.setDaemon(True)
         t.start()
 
-
+        
 def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_count=2):
     global g_failed_dirs
     fs = XRootD.client.FileSystem(base_url)
     logging.info("Starting processing of top-level directory %s", directory)
     worklist = [directory]
     base_len = len(directory)
+    top_level_dir = directory
 
     # Create our input / output queues for helper threads
     work_queue = Queue.Queue(maxsize=thread_count)
@@ -379,6 +384,12 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
         xrootd_cwd_names = set()
         entries = list(dirlist.dirlist)
         logging.debug("Directory %s has %d entries" % (cwd, len(entries)))
+        if cwd == top_level_dir:
+            print("%s is the top level directory" % (cwd))
+            if len(entries) == 0:
+               logging.warning("The top level directory is empty, not removing any subdirectories.")
+               g_failure_reasons.append("Top level directory empty")
+               break
         random.shuffle(entries)
         for entry in entries:
             if should_ignore_path(cwd + "/" + entry.name, ignore, include):
@@ -449,27 +460,27 @@ def main():
     # Processing rate is not sensible as we don't know if this is a "new" checksum.
     #print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
 
-    if not opts.failed:
-        if g_failed_files:
-            print "Failed files:"
-            for file in g_failed_files:
-                print file
-    else:
+    if opts.failed:
         fh = open(opts.failed, "w")
         fh.write("\n".join(g_failed_files))
+        fh.write("\n".join(g_failed_dirs))
     if g_failed_files:
-        print "There were %d synchronization failures." % len(g_failed_files)
-        # TODO: cleanup partial grafts
+        print "There were %d file failures." % len(g_failed_files)
+        g_failure_reasons.append("File failures")
+        for file in g_failed_files:
+            print file
+            # TODO: cleanup partial grafts
+    if g_failed_dirs:
+        print "There were %d listing failures." % len(g_failed_dirs)
+        g_failure_reasons.append("Directory failures")
+        for dir in g_failed_dirs:
+            print dir
+    if g_failure_reasons:
+        print(g_failure_reasons)
         return 1
     else:
-        if g_failed_dirs:
-            print "There were %d listing failures." % len(g_failed_dirs)
-            for directory in g_failed_dirs:
-                print directory
-            return 1
-        else:
-            print "Synchronization completed successfully!"
-            return 0
+        print "Synchronization completed successfully!"
+        return 0
 
 if __name__ == '__main__':
     sys.exit(main())
