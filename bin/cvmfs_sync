@@ -301,7 +301,11 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
                 #timed_out_futures.append(future)
             except Exception as e:
                 logging.error("Failure when trying to checksum %s (size %d); will regenerate.  Exception: %s" % (future.filename, future.size, str(e)))
-                g_failed_files.append(gridftp_base_url + "/" + future.filename)
+                if "permission denied" in str(e).lower():
+                    print("Skipping permission denied error")
+                else:
+                    g_failed_files.append(gridftp_base_url + "/" + future.filename)
+                #g_failed_files.append(gridftp_base_url + "/" + future.filename)
         futures = timed_out_futures
     logging.info("All jobs processed - closing up pool.")
     pool.join()
@@ -378,7 +382,10 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
         results_received += 1
         if status.status:
             logging.warning("Failed to list directory (%s) skipping: %s" % (cwd, status))
-            g_failed_dirs.append(str(cwd))
+            if "permission denied" in str(status).lower():
+                print("Skipping permission denied error")
+            else:
+                g_failed_dirs.append(str(cwd))
             continue
 
         xrootd_cwd_names = set()
