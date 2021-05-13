@@ -101,6 +101,17 @@ def should_ignore_path(entry_name, ignore, include):
              return True
     return False
 
+def should_ignore_filename(filename):
+    #ignore file names with illegal characters ?, *, >, <, [, ], |, ;, &, (, ), $, \
+    #https://xrootd.slac.stanford.edu/doc/dev52/XRdv400.htm#_Toc66820389
+    should_ignore = False
+    bad_chars = ['?', '*', '>', '<', '[', ']', '|', ';', '&', '(', ')', '$', '\\']
+    for i in bad_chars:
+       if i in filename:
+           logging.debug("Ignoring file name %s" % filename)
+           should_ignore = True
+           break
+    return should_ignore
 
 def graft_filename(filename):
     parent_dir, fname = os.path.split(filename)
@@ -282,6 +293,8 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
         output_filename = output_dir + filename
         input_url = base_url + filename
         if should_skip(input_url, output_filename, size):
+            continue
+        if should_ignore_filename(filename):
             continue
         future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, deadline))
         future.filename = filename
