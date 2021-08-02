@@ -10,6 +10,8 @@ import argparse
 def parse_opts():
     parser = argparse.ArgumentParser(description="Generate ligo authorization file")
     parser.add_argument("-u", "--url", dest="url", help="LDAP server URL", default="ldaps://ldap.ligo.org")
+    parser.add_argument("-d", "--dn", dest="dn", help="User's DN to access LDAP server", default="uid=osg-services-brian-lin,ou=system,dc=ligo,dc=org")
+    parser.add_argument("-p", "--password", dest="password", help="Password of the DN")
     parser.add_argument("-b", "--base", dest="base", action='append', help="LDAP server base tree", default=["ou=people,dc=ligo,dc=org", "ou=robot,dc=ligo,dc=org"])
     parser.add_argument("-g", "--group", dest="group", action='append', help="Authorized group name", default=["Communities:LSCVirgoLIGOGroupMembers", "Communities:robot:OSGRobotCert"])
     parser.add_argument("-w", "--whitelist", dest="whitelist", help="Whitelist filename")
@@ -23,7 +25,13 @@ def main():
     ldap_obj = ldap.initialize(opts.url)
     if len(opts.group) != len(opts.base):
         raise ValueError("Number of groups ({}) is not equal to number of base ({}) arguments".format(len(opts.group), len(opts.base)))
-
+    try:
+        ldap_obj.protocal_version = ldap.VERSION3
+        ldap_obj.simple_bind_s(opts.dn, opts.password)
+        valid = True
+    except Exception, error:
+        print error
+        
     all_dns = []
     for i in range(len(opts.group)):
         print("Querying {} and {}".format(opts.group[i], opts.base[i]))
