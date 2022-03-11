@@ -323,7 +323,30 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
     logging.info("All jobs processed - closing up pool.")
     pool.join()
 
-    
+
+def lookup_dataserver(redirector, path, timeout=10):
+    """
+    Look up an individual data server from a redirector.
+    If lookup fails, return the original redirector.
+
+    For sites where the redirector does not have the cluster filesystem
+    mounted, dirlist requests will fail. Use this function to select
+    a data server.
+    """
+
+    fs = XRootD.client.FileSystem(redirector)
+
+    handler = XRootD.client.utils.AsyncResponseHandler()
+    status = fs.stat(path, timeout=timeout, callback=handler)
+    status, _, hostlist = handler.wait()
+
+    if status.ok:
+        # Return the last URL in the hostlist (the data server)
+        return(str(list(hostlist)[-1].url))
+    else:
+        return redirector
+
+
 def list_dir(work_queue, results_queue, fs):
     """
     Helper thread for listing directories in parallel
@@ -356,7 +379,9 @@ def start_listing_workers(thread_count, work_queue, results_queue, fs):
         
 def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_count=2):
     global g_failed_dirs
-    fs = XRootD.client.FileSystem(base_url)
+    base_data_url = lookup_dataserver(base_url, directory)
+    fs = XRootD.client.FileSystem(base_data_url)
+    logging.info("Switching from redirector %s to data server %s" % (base_url, base_data_url))
     logging.info("Starting processing of top-level directory %s", directory)
     worklist = [directory]
     base_len = len(directory)
