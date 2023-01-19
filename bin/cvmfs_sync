@@ -125,7 +125,7 @@ def should_skip(input_url, output_filename, size):
     # CVMFS checksum format has trouble with very large files.
     # There's additionally suspicious-looking failures around zero-sized
     # files.
-    if (size > 26*(1024**3)) or (size == 0):
+    if (size > 500*(1024**3)) or (size == 0):
         return True
 
     if os.path.exists(output_filename):
