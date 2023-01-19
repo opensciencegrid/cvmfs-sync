@@ -31,12 +31,13 @@ def main():
         valid = True
     except Exception, error:
         print error
-        
+
     all_dns = []
     for i in range(len(opts.group)):
         print("Querying {} and {}".format(opts.group[i], opts.base[i]))
         query = "(&(isMemberOf=%s)(gridX509subject=*))" % opts.group[i]
         results = ldap_obj.search_s(opts.base[i], ldap.SCOPE_SUBTREE, query, ["gridX509subject"])
+        print("Got {} results".format(len(results)))
         for result in results:
             user_dns = result[1].get('gridX509subject', [])
             all_dns += [i.decode('utf-8').replace("\n", " ") for i in user_dns if i.decode('utf-8').startswith("/")]
@@ -48,7 +49,8 @@ def main():
     if opts.output_file:
         dir, fname = os.path.split(opts.output_file)
         fd, name = tempfile.mkstemp(prefix=fname, dir=dir)
-        os.write(fd, b"x509%\n")
+        #os.write(fd, b"x509%\n")
+        os.write(fd, b"scitoken%\n")
         dns = "\n".join(all_dns)
         os.write(fd, dns.encode() + b"\n")
         os.close(fd)
