@@ -1,6 +1,7 @@
 #!/usr/bin/python
 
 import os
+import stat
 import sys
 import time
 import errno
@@ -120,7 +121,7 @@ def graft_filename(filename):
     return os.path.join(parent_dir, ".cvmfsgraft-" + fname)
 
 
-def should_skip(input_url, output_filename, size):
+def should_skip(input_url, output_filename, size, output_mode):
     global g_skip_count
     graftfile = graft_filename(output_filename)
 
@@ -132,7 +133,12 @@ def should_skip(input_url, output_filename, size):
 
     if os.path.exists(output_filename):
         st = os.stat(output_filename)
-        if size == st.st_size:
+
+        # Compare size and mode to source
+        size_ok = size == st.st_size
+        mode_ok = output_mode == stat.S_IMODE(st.st_mode)
+
+        if size_ok and mode_ok:
             g_skip_count += 1
             return True
         elif os.path.exists(graftfile):
@@ -145,13 +151,13 @@ def should_skip(input_url, output_filename, size):
                             break
                         except:
                             pass
-            if size == graft_size:
+            if size == graft_size and mode_ok:
                 g_skip_count += 1
                 return True
-            logging.warning("Graft size mismatch!  Regenerating file %s (size %d) -> %s (graft size %d)" % \
+            logging.warning("Graft size/mode mismatch!  Regenerating file %s (size %d) -> %s (graft size %d)" % \
                     (input_url, size, output_filename, graft_size))
         else:
-            logging.warning("Size mismatch!  Regenerating file %s (size %d) -> %s (size %d)" % \
+            logging.warning("Size/mode mismatch!  Regenerating file %s (size %d) -> %s (size %d)" % \
                     (input_url, size, output_filename, st.st_size))
             os.unlink(output_filename)
     try:
@@ -162,7 +168,7 @@ def should_skip(input_url, output_filename, size):
     return False
 
 
-def process_download_file(xrootd_url, output_filename, deadline):
+def process_download_file(xrootd_url, output_filename, output_mode, deadline):
     """
     Download an entire file to the local host and stream its contents through cvmfs_swissknife
     in order to create checksums.
@@ -210,6 +216,7 @@ def process_download_file(xrootd_url, output_filename, deadline):
             logging.debug("Finished processing URL %s" % xrootd_url)
             os.close(writefp)
             os.waitpid(pid, 0)
+            os.chmod(output_filename, output_mode)
             break
         else:
             try:
@@ -223,7 +230,7 @@ def process_download_file(xrootd_url, output_filename, deadline):
     return next_offset
 
 
-def process_checksum_file(gridftp_url, xrootd_url, output_filename, deadline):
+def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode, deadline):
     """
     Process and create a CVMFS checksum / graft file.
 
@@ -231,7 +238,7 @@ def process_checksum_file(gridftp_url, xrootd_url, output_filename, deadline):
     utilize Xrootd to download the file to memory and checksum it locally.
     """
     if not gridftp_url:
-        return process_download_file(xrootd_url, output_filename, deadline)
+        return process_download_file(xrootd_url, output_filename, output_mode, deadline)
 
     if (deadline > 0) and (time.time() > deadline):
         raise Exception("URL %s timed out when still in processing queue." % xrootd_url)
@@ -279,7 +286,7 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
     # First, try to retrieve the file
     pool = multiprocessing.Pool(count)
     futures = []
-    for filename, size in process_dir(xrootd_connection_info, xrootd_directory, output_dir, ignore=ignore, include=include, thread_count=thread_count):
+    for filename, statinfo in process_dir(xrootd_connection_info, xrootd_directory, output_dir, ignore=ignore, include=include, thread_count=thread_count):
         if deadline and (time.time() > deadline):
             logging.error("Passed deadline when scanning directory tree")
             break
@@ -294,11 +301,18 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
         xrootd_url = base_url + filename
         output_filename = output_dir + filename
         input_url = base_url + filename
-        if should_skip(input_url, output_filename, size):
+
+        size = statinfo.size
+        if (statinfo.flags & XRootD.client.flags.StatInfoFlags.X_BIT_SET):
+            output_mode = 0o755 # Is executable, set 755
+        else:
+            output_mode = 0o644 # Else 644
+
+        if should_skip(input_url, output_filename, size, output_mode):
             continue
         if should_ignore_filename(filename):
             continue
-        future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, deadline))
+        future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, output_mode, deadline))
         future.filename = filename
         future.size = size
         futures.append(future)
@@ -447,7 +461,7 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
                 worklist.append(cwd + "/" + entry.name)
             else:
                 fname = cwd + "/" + entry.name
-                yield (fname[base_len:], entry.statinfo.size)
+                yield (fname[base_len:], entry.statinfo)
         cwd_output = output_dir + "/" + cwd[len(directory):]
         try:
             cwd_output_names = set(os.listdir(cwd_output))
