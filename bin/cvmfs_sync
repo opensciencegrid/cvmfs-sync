@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 import os
 import stat
@@ -6,13 +6,13 @@ import sys
 import time
 import errno
 import xattr
-import Queue
+import queue
 import random
 import shutil
 import logging
 import fnmatch
 import optparse
-import urlparse
+import urllib.parse
 import threading
 import subprocess
 import multiprocessing
@@ -64,7 +64,7 @@ def parse_opts():
 
     opts, args = parser.parse_args()
     if len(args) < 2:
-        print >> sys.stderr, "Need at least one source and destination"
+        print("Need at least one source and destination", file=sys.stderr)
         parser.print_usage()
         sys.exit(1)
 
@@ -162,7 +162,7 @@ def should_skip(input_url, output_filename, size, output_mode):
             os.unlink(output_filename)
     try:
         os.makedirs(os.path.split(output_filename)[0])
-    except OSError, oe:
+    except OSError as oe:
         if oe.errno != errno.EEXIST:
             raise
     return False
@@ -221,7 +221,7 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
         else:
             try:
                 os.write(writefp, response)
-            except OSError, oe:
+            except OSError as oe:
                 if oe.errno != errno.EPIPE:
                     raise
                 logging.error("cvmfs_swissknife process unexpectedly died.")
@@ -243,7 +243,7 @@ def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode,
     if (deadline > 0) and (time.time() > deadline):
         raise Exception("URL %s timed out when still in processing queue." % xrootd_url)
 
-    parsed = urlparse.urlparse(gridftp_url)
+    parsed = urllib.parse.urlparse(gridftp_url)
     logging.info("Querying GridFTP server for %s" % gridftp_url)
     try:
         if subprocess32:
@@ -279,7 +279,7 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
     current = 0
     worklist = []
 
-    xrootd_base_parsed = urlparse.urlparse(base_url)
+    xrootd_base_parsed = urllib.parse.urlparse(base_url)
     xrootd_connection_info = xrootd_base_parsed.scheme + "://" + xrootd_base_parsed.netloc
     xrootd_directory = xrootd_base_parsed.path
 
@@ -404,9 +404,9 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
     top_level_dir = directory
 
     # Create our input / output queues for helper threads
-    work_queue = Queue.Queue(maxsize=thread_count)
+    work_queue = queue.Queue(maxsize=thread_count)
     work_sent = 0
-    results_queue = Queue.Queue() # shouldn't block
+    results_queue = queue.Queue() # shouldn't block
     results_received = 0
     start_listing_workers(thread_count, work_queue, results_queue, fs)
 
@@ -446,7 +446,7 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
         entries = list(dirlist.dirlist)
         logging.debug("Directory %s has %d entries" % (cwd, len(entries)))
         if cwd == top_level_dir:
-            print("%s is the top level directory" % (cwd))
+            print(("%s is the top level directory" % (cwd)))
             if len(entries) == 0:
                logging.warning("The top level directory is empty, not removing any subdirectories.")
                g_failure_reasons.append("Top level directory empty")
@@ -496,7 +496,7 @@ def main():
     opts, args = parse_opts()
     dest = args[-1]
     srcs = args[:-1]
-    print "Inputs to process:", ",".join(srcs)
+    print("Inputs to process:", ",".join(srcs))
     concurrency = opts.concurrency
     starttime = time.time()
 
@@ -516,8 +516,8 @@ def main():
         process_files(src, gridftp_src, dest, concurrency, ignore=opts.ignore, include=opts.include, thread_count=opts.metadata_concurrency, deadline=deadline)
 
     processing_time = time.time() - starttime
-    print "Total of %.1f GB in %d files processed in %.2f seconds." % (g_bytes_xfer/(1024.**3), len(g_processed_files), processing_time)
-    print "%d file checksums were skipped because they already exist locally." % g_skip_count
+    print("Total of %.1f GB in %d files processed in %.2f seconds." % (g_bytes_xfer/(1024.**3), len(g_processed_files), processing_time))
+    print("%d file checksums were skipped because they already exist locally." % g_skip_count)
     # Processing rate is not sensible as we don't know if this is a "new" checksum.
     #print "Processing rate: %.2fMB/s" % (g_bytes_xfer/processing_time/(1024*1024.))
 
@@ -526,21 +526,21 @@ def main():
         fh.write("\n".join(g_failed_files))
         fh.write("\n".join(g_failed_dirs))
     if g_failed_files:
-        print "There were %d file failures." % len(g_failed_files)
+        print("There were %d file failures." % len(g_failed_files))
         g_failure_reasons.append("File failures")
         for file in g_failed_files:
-            print file
+            print(file)
             # TODO: cleanup partial grafts
     if g_failed_dirs:
-        print "There were %d listing failures." % len(g_failed_dirs)
+        print("There were %d listing failures." % len(g_failed_dirs))
         g_failure_reasons.append("Directory failures")
         for dir in g_failed_dirs:
-            print dir
+            print(dir)
     if g_failure_reasons:
         print(g_failure_reasons)
         return 1
     else:
-        print "Synchronization completed successfully!"
+        print("Synchronization completed successfully!")
         return 0
 
 if __name__ == '__main__':

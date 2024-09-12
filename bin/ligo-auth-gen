@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 import os
 import sys
@@ -29,15 +29,15 @@ def main():
         ldap_obj.protocal_version = ldap.VERSION3
         ldap_obj.simple_bind_s(opts.dn, opts.password)
         valid = True
-    except Exception, error:
-        print error
+    except Exception as error:
+        print(error)
 
     all_dns = []
     for i in range(len(opts.group)):
-        print("Querying {} and {}".format(opts.group[i], opts.base[i]))
+        print(("Querying {} and {}".format(opts.group[i], opts.base[i])))
         query = "(&(isMemberOf=%s)(gridX509subject=*))" % opts.group[i]
         results = ldap_obj.search_s(opts.base[i], ldap.SCOPE_SUBTREE, query, ["gridX509subject"])
-        print("Got {} results".format(len(results)))
+        print(("Got {} results".format(len(results))))
         for result in results:
             user_dns = result[1].get('gridX509subject', [])
             all_dns += [i.decode('utf-8').replace("\n", " ") for i in user_dns if i.decode('utf-8').startswith("/")]
