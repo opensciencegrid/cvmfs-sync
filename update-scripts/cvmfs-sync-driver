@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python3
 
 """
 Driver script for updating a CVMFS repository with external files using the
@@ -13,7 +13,7 @@ import logging
 import argparse
 import tempfile
 import subprocess
-import ConfigParser
+import configparser
 
 
 def cvmfs_abort(repo_name):
@@ -200,10 +200,10 @@ class CvmfsPublicationDriver(object):
 
         self.log.info("Starting publication run for %s", self.repo)
         self.setup_authz()
-	"""
-	Skip setup_x509_credential() if authz_file is set
-	"""
-	if self.authz_file is None:
+        """
+        Skip setup_x509_credential() if authz_file is set
+        """
+        if self.authz_file is None:
             self.setup_x509_credential()
 
         self.start_transaction()
@@ -241,8 +241,8 @@ class CvmfsPublicationDriver(object):
         try:
             subprocess.check_output(command, stderr=subprocess.STDOUT)
         except subprocess.CalledProcessError as cpe:
-            print cpe
-            print cpe.output
+            print(cpe)
+            print(cpe.output)
         self.log.info("Commit finished for %s", self.repo)
 
 
@@ -262,7 +262,7 @@ def main():
     else:
         logging.basicConfig(level=logging.INFO, format="%(levelname)-8s: %(message)s")
 
-    cp = ConfigParser.ConfigParser()
+    cp = configparser.ConfigParser()
     with open(args.config) as fp:
         cp.readfp(fp)
 
