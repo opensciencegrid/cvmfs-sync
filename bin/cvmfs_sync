@@ -176,16 +176,9 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
     if (deadline > 0) and (time.time() > deadline):
         raise Exception("URL %s timed out when still in processing queue." % xrootd_url)
 
-    fp = XRootD.client.File()
-    status = fp.open(xrootd_url)[0]
-    if status.status:
-        raise Exception("Failed to open file (%s) in Xrootd: %s" % (xrootd_url, status))
-
-    # Check deadline again; file-open may have taken awhile for an unresponsive server.
-    if (deadline > 0) and (time.time() > deadline):
-        raise Exception("URL %s timed out while being opened." % xrootd_url)
-
     logging.info("Grafting %s to %s" % (xrootd_url, output_filename))
+
+    # Fork cvmfs_swissknife
     readfp, writefp = os.pipe()
     pid = os.fork()
     if not pid:
@@ -196,6 +189,23 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
             os.execvp("cvmfs_swissknife", args)
         finally:
             raise Exception("Failed to exec cvmfs_swissknife for processing URL %s" % xrootd_url)
+
+    # Open remote file
+    # After fork to reduce risk of xrootd thread cleanup deadlock
+    fp = XRootD.client.File()
+    status = fp.open(xrootd_url)[0]
+    if status.status:
+        # Cleanup cvmfs_swissknife
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        raise Exception("Failed to open file (%s) in Xrootd: %s" % (xrootd_url, status))
+
+    # Check deadline again; file-open may have taken awhile for an unresponsive server.
+    if (deadline > 0) and (time.time() > deadline):
+        # Cleanup cvmfs_swissknife
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        raise Exception("URL %s timed out while being opened." % xrootd_url)
 
     os.close(readfp)
     next_offset = 0
