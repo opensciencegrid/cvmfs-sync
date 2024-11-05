@@ -8,6 +8,7 @@ import errno
 import xattr
 import queue
 import random
+import signal
 import shutil
 import logging
 import fnmatch
