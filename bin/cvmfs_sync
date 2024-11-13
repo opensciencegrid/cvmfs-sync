@@ -206,7 +206,6 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
         # Cleanup cvmfs_swissknife
         os.kill(pid, signal.SIGKILL)
         os.waitpid(pid, 0)
-        fp.close()
         raise Exception("URL %s timed out while being opened." % xrootd_url)
 
     os.close(readfp)
@@ -215,14 +214,12 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
         if (deadline > 0) and (time.time() > deadline):
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
-            fp.close()
             raise Exception("Timed out when transferring URL %s" % xrootd_url)
 
         status, response = fp.read(offset=next_offset, size=1024*1024)
         if status.status:
             os.kill(pid, signal.SIGKILL)
             os.waitpid(pid, 0)
-            fp.close()
             raise Exception("Failed to create read request for %s; status: %s; killing graft %d" % (xrootd_url, str(status), pid))
 
         # Empty response indicates EOF.
@@ -236,13 +233,11 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
             try:
                 os.write(writefp, response)
             except OSError as oe:
-                fp.close()
                 if oe.errno != errno.EPIPE:
                     raise
                 logging.error("cvmfs_swissknife process unexpectedly died.")
                 return False
             next_offset += len(response)
-    fp.close()
     return next_offset
 
 
