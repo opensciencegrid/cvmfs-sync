@@ -193,8 +193,7 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
 
     # Open remote file
     # After fork to reduce risk of xrootd thread cleanup deadlock
-    fp = XRootD.client.File()
-    try:
+    with XRootD.client.File() as fp:
         status = fp.open(xrootd_url)[0]
         if status.status:
             # Cleanup cvmfs_swissknife
@@ -240,8 +239,6 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
                     return False
                 next_offset += len(response)
         return next_offset
-    finally:
-        fp.close()
 
 
 def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode, deadline):
