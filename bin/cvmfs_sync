@@ -5,7 +5,6 @@ import stat
 import sys
 import time
 import errno
-import xattr
 import queue
 import random
 import signal
