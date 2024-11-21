@@ -61,6 +61,8 @@ def parse_opts():
                       help="Enable verbose printout.")
     parser.add_option("-t", "--max-time", dest="max_time", type="int", default=0,
                       help="Time threshold for starting new transfers, in minutes.")
+    parser.add_option("--check-mtime", default=False, action="store_true",
+                      help="Detect file changes with mtime")
 
     opts, args = parser.parse_args()
     if len(args) < 2:
@@ -121,7 +123,7 @@ def graft_filename(filename):
     return os.path.join(parent_dir, ".cvmfsgraft-" + fname)
 
 
-def should_skip(input_url, output_filename, size, output_mode):
+def should_skip(input_url, output_filename, size, output_mode, mtime=None):
     global g_skip_count
     graftfile = graft_filename(output_filename)
 
@@ -138,7 +140,13 @@ def should_skip(input_url, output_filename, size, output_mode):
         size_ok = size == st.st_size
         mode_ok = output_mode == stat.S_IMODE(st.st_mode)
 
-        if size_ok and mode_ok:
+        # Compare mtime if we received it
+        if mtime:
+            mtime_ok = mtime == st.st_mtime
+        else:
+            mtime_ok = True
+
+        if size_ok and mode_ok and mtime_ok:
             g_skip_count += 1
             return True
         elif os.path.exists(graftfile):
@@ -151,14 +159,14 @@ def should_skip(input_url, output_filename, size, output_mode):
                             break
                         except:
                             pass
-            if size == graft_size and mode_ok:
+            if size == graft_size and mode_ok and mtime_ok:
                 g_skip_count += 1
                 return True
-            logging.warning("Graft size/mode mismatch!  Regenerating file %s (size %d) -> %s (graft size %d)" % \
-                    (input_url, size, output_filename, graft_size))
+            logging.warning("Graft size/mode/mtime mismatch!  Regenerating file %s (size %d, %d) -> %s (graft size %d, %d)" % \
+                    (input_url, size, mtime, output_filename, graft_size, st.st_mtime))
         else:
-            logging.warning("Size/mode mismatch!  Regenerating file %s (size %d) -> %s (size %d)" % \
-                    (input_url, size, output_filename, st.st_size))
+            logging.warning("Size/mode/mtime mismatch!  Regenerating file %s (size %d, %d) -> %s (size %d, %d)" % \
+                    (input_url, size, mtime, output_filename, st.st_size, st.st_mtime))
             os.unlink(output_filename)
     try:
         os.makedirs(os.path.split(output_filename)[0])
@@ -168,7 +176,7 @@ def should_skip(input_url, output_filename, size, output_mode):
     return False
 
 
-def process_download_file(xrootd_url, output_filename, output_mode, deadline):
+def process_download_file(xrootd_url, output_filename, output_mode, mtime, deadline):
     """
     Download an entire file to the local host and stream its contents through cvmfs_swissknife
     in order to create checksums.
@@ -227,6 +235,7 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
                 os.close(writefp)
                 os.waitpid(pid, 0)
                 os.chmod(output_filename, output_mode)
+                os.utime(output_filename, (mtime, mtime))
                 break
             else:
                 try:
@@ -240,7 +249,7 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
         return next_offset
 
 
-def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode, deadline):
+def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode, mtime, deadline):
     """
     Process and create a CVMFS checksum / graft file.
 
@@ -248,7 +257,7 @@ def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode,
     utilize Xrootd to download the file to memory and checksum it locally.
     """
     if not gridftp_url:
-        return process_download_file(xrootd_url, output_filename, output_mode, deadline)
+        return process_download_file(xrootd_url, output_filename, output_mode, mtime, deadline)
 
     if (deadline > 0) and (time.time() > deadline):
         raise Exception("URL %s timed out when still in processing queue." % xrootd_url)
@@ -283,7 +292,7 @@ def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode,
     return 0
 
 
-def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], include=[], thread_count=2, deadline=0):
+def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], include=[], thread_count=2, deadline=0, compare_mtime=False):
     global g_bytes_xfer
 
     current = 0
@@ -318,11 +327,16 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
         else:
             output_mode = 0o644 # Else 644
 
-        if should_skip(input_url, output_filename, size, output_mode):
+        if compare_mtime:
+            mtime = statinfo.modtime
+        else:
+            mtime = None
+
+        if should_skip(input_url, output_filename, size, output_mode, mtime):
             continue
         if should_ignore_filename(filename):
             continue
-        future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, output_mode, deadline))
+        future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, output_mode, mtime, deadline))
         future.filename = filename
         future.size = size
         futures.append(future)
@@ -523,7 +537,7 @@ def main():
         gridftp_src = ''
         if len(info) == 2:
             src, gridftp_src = info
-        process_files(src, gridftp_src, dest, concurrency, ignore=opts.ignore, include=opts.include, thread_count=opts.metadata_concurrency, deadline=deadline)
+        process_files(src, gridftp_src, dest, concurrency, ignore=opts.ignore, include=opts.include, thread_count=opts.metadata_concurrency, deadline=deadline, compare_mtime=opts.check_mtime)
 
     processing_time = time.time() - starttime
     print("Total of %.1f GB in %d files processed in %.2f seconds." % (g_bytes_xfer/(1024.**3), len(g_processed_files), processing_time))
