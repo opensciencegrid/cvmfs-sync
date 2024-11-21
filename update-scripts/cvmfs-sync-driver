@@ -57,6 +57,7 @@ class CvmfsSyncDriver(object):
         if config.has_option(section, "gridftp_source"):
             self.gridftp_source = config.get(section, "gridftp_source")
         self.destination = config.get(section, "destination")
+        self.check_mtime = config.getboolean(section, "check_mtime")
 
     def run(self):
         """
@@ -73,6 +74,8 @@ class CvmfsSyncDriver(object):
             command += ["--ignore", ",".join(self.ignore)]
         if self.include:
             command += ["--include", ",".join(self.include)]
+        if self.check_mtime:
+            command += ["--check-mtime"]
         command += ["--verbose"]
         source = self.source
         if self.gridftp_source:
