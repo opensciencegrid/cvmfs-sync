@@ -168,7 +168,7 @@ def should_skip(input_url, output_filename, size, output_mode):
                     (input_url, size, output_filename, st.st_size))
             try:
                 os.unlink(output_filename)
-            except as e:
+            except Exception as e:
                 logging.error("Unable to unlink: %s" % str(e))
                 return True
     try:
