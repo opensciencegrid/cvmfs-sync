@@ -135,7 +135,7 @@ def should_skip(input_url, output_filename, size, output_mode):
     if os.path.exists(output_filename):
         st = os.stat(output_filename)
 
-        if stat.S_ISDIR(output_mode) and stat.S_ISDIR(st.st_mode):
+        if stat.S_ISDIR(st.st_mode):
             g_skip_count += 1
             return True
         # TODO: This probably does not handle the case of directories
@@ -168,7 +168,7 @@ def should_skip(input_url, output_filename, size, output_mode):
                     (input_url, size, output_filename, st.st_size))
             try:
                 os.unlink(output_filename)
-            except as e:
+            except Exception as e:
                 logging.error("Unable to unlink: %s" % str(e))
                 return True
     try:
