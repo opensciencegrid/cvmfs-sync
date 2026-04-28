@@ -135,7 +135,7 @@ def should_skip(input_url, output_filename, size, output_mode):
     if os.path.exists(output_filename):
         st = os.stat(output_filename)
 
-        if stat.S_ISDIR(output_mode) and stat.S_ISDIR(st.st_mode):
+        if stat.S_ISDIR(st.st_mode):
             g_skip_count += 1
             return True
         # TODO: This probably does not handle the case of directories
