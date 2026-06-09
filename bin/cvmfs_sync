@@ -15,20 +15,10 @@ import fnmatch
 import optparse
 import urllib.parse
 import threading
-import subprocess
 import multiprocessing
+import xml.etree.ElementTree as ET
 
-try:
-    import subprocess32
-except ImportError:
-    subprocess32 = None
-
-oldpath = sys.path
-sys.path = sys.path[1:]
-
-import XRootD.client
-
-sys.path = oldpath
+from webdav4.client import Client
 
 g_failed_files = []
 g_processed_files = []
@@ -179,15 +169,131 @@ def should_skip(input_url, output_filename, size, output_mode):
     return False
 
 
-def process_download_file(xrootd_url, output_filename, output_mode, deadline):
-    """
-    Download an entire file to the local host and stream its contents through cvmfs_swissknife
-    in order to create checksums.
-    """
-    if (deadline > 0) and (time.time() > deadline):
-        raise Exception("URL %s timed out when still in processing queue." % xrootd_url)
+# Per-operation socket timeout (seconds) for the underlying httpx client.
+WEBDAV_TIMEOUT = 300
 
-    logging.info("Grafting %s to %s" % (xrootd_url, output_filename))
+# PROPFIND body requesting just the properties we need: whether the entry is a
+# collection (directory), its size, and the Apache mod_dav "executable" flag.
+PROPFIND_BODY = (
+    '<?xml version="1.0" encoding="utf-8"?>'
+    '<D:propfind xmlns:D="DAV:" xmlns:lp="http://apache.org/dav/props/">'
+    '<D:prop><D:resourcetype/><D:getcontentlength/><lp:executable/></D:prop>'
+    '</D:propfind>'
+)
+
+# Cache of webdav4 clients keyed by connection (scheme://netloc).  This is a
+# per-process cache; download worker processes each build their own client so
+# that httpx connections are never shared across forks.
+_g_client_cache = {}
+
+
+def make_client(connection):
+    """Create a webdav4 client for a connection (e.g. https://host:port).
+
+    Redirects are followed so that storage redirectors transparently hand off
+    to the actual data server.
+    """
+    return Client(connection, follow_redirects=True, timeout=WEBDAV_TIMEOUT)
+
+
+def get_client(connection):
+    """Return a cached webdav4 client for the connection, creating one if needed."""
+    client = _g_client_cache.get(connection)
+    if client is None:
+        client = make_client(connection)
+        _g_client_cache[connection] = client
+    return client
+
+
+def _localname(tag):
+    """Strip the XML namespace from an ElementTree tag."""
+    return tag.split("}", 1)[1] if "}" in tag else tag
+
+
+class WebDAVEntry(object):
+    """A single child entry returned by a directory listing."""
+    __slots__ = ("name", "is_dir", "size", "executable")
+
+    def __init__(self, name, is_dir, size, executable):
+        self.name = name
+        self.is_dir = is_dir
+        self.size = size
+        self.executable = executable
+
+
+def propfind_dir(client, path):
+    """
+    List a single directory level over WebDAV via a PROPFIND with Depth: 1.
+
+    Returns a list of WebDAVEntry, one per child (the directory itself is
+    excluded).  Raises an exception (whose message contains "permission denied"
+    for 401/403) when the listing fails.
+    """
+    url = client.join_url(path)
+    resp = client.http.request("PROPFIND", url, content=PROPFIND_BODY,
+                               headers={"Depth": "1", "Content-Type": "application/xml"},
+                               follow_redirects=True)
+    if resp.status_code in (401, 403):
+        raise Exception("Permission denied (HTTP %d) when listing %s" % (resp.status_code, path))
+    resp.raise_for_status()
+
+    root = ET.fromstring(resp.content)
+    req_path = urllib.parse.urlsplit(str(url)).path.rstrip("/")
+    entries = []
+    for response in root:
+        if _localname(response.tag) != "response":
+            continue
+        href = None
+        size = 0
+        is_dir = False
+        executable = False
+        have_props = False
+        for child in response:
+            ln = _localname(child.tag)
+            if ln == "href":
+                href = child.text
+            elif ln == "propstat":
+                status = "".join(s.text or "" for s in child if _localname(s.tag) == "status")
+                if "200" not in status:
+                    continue
+                have_props = True
+                for prop in child:
+                    if _localname(prop.tag) != "prop":
+                        continue
+                    for el in prop:
+                        eln = _localname(el.tag)
+                        if eln == "resourcetype":
+                            if any(_localname(g.tag) == "collection" for g in el):
+                                is_dir = True
+                        elif eln == "getcontentlength" and el.text:
+                            try:
+                                size = int(el.text)
+                            except ValueError:
+                                pass
+                        elif eln == "executable" and el.text:
+                            executable = el.text.strip().upper() == "T"
+        if not have_props or not href:
+            continue
+        # Resolve the href (which may be percent-encoded and/or an absolute URL)
+        # down to a server path, then take its basename.
+        href_path = urllib.parse.unquote(urllib.parse.urlsplit(href).path).rstrip("/")
+        if href_path == req_path:
+            continue  # the directory itself
+        name = href_path.rsplit("/", 1)[-1]
+        entries.append(WebDAVEntry(name, is_dir, size, executable))
+    return entries
+
+
+def process_download_file(connection, server_path, output_filename, output_mode, deadline):
+    """
+    Download an entire file over WebDAV and stream its contents through
+    cvmfs_swissknife in order to create checksums.
+    """
+    url = connection + server_path
+    if (deadline > 0) and (time.time() > deadline):
+        raise Exception("URL %s timed out when still in processing queue." % url)
+
+    logging.info("Grafting %s to %s" % (url, output_filename))
 
     # Fork cvmfs_swissknife
     readfp, writefp = os.pipe()
@@ -199,115 +305,77 @@ def process_download_file(xrootd_url, output_filename, output_mode, deadline):
             args = ['cvmfs_swissknife', 'graft', '-i', '-', '-o', output_filename, '-Z', 'none', '-c', '24']
             os.execvp("cvmfs_swissknife", args)
         finally:
-            raise Exception("Failed to exec cvmfs_swissknife for processing URL %s" % xrootd_url)
+            raise Exception("Failed to exec cvmfs_swissknife for processing URL %s" % url)
 
-    # Open remote file
-    # After fork to reduce risk of xrootd thread cleanup deadlock
-    with XRootD.client.File() as fp:
-        status = fp.open(xrootd_url)[0]
-        if status.status:
-            # Cleanup cvmfs_swissknife
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-            raise Exception("Failed to open file (%s) in Xrootd: %s" % (xrootd_url, status))
+    os.close(readfp)
+    client = get_client(connection)
 
-        # Check deadline again; file-open may have taken awhile for an unresponsive server.
-        if (deadline > 0) and (time.time() > deadline):
-            # Cleanup cvmfs_swissknife
-            os.kill(pid, signal.SIGKILL)
-            os.waitpid(pid, 0)
-            raise Exception("URL %s timed out while being opened." % xrootd_url)
+    # Check deadline again; the queue may have backed up.
+    if (deadline > 0) and (time.time() > deadline):
+        os.kill(pid, signal.SIGKILL)
+        os.waitpid(pid, 0)
+        raise Exception("URL %s timed out before the download started." % url)
 
-        os.close(readfp)
-        next_offset = 0
-        while True:
-            if (deadline > 0) and (time.time() > deadline):
-                os.kill(pid, signal.SIGKILL)
-                os.waitpid(pid, 0)
-                raise Exception("Timed out when transferring URL %s" % xrootd_url)
-
-            status, response = fp.read(offset=next_offset, size=1024*1024)
-            if status.status:
-                os.kill(pid, signal.SIGKILL)
-                os.waitpid(pid, 0)
-                raise Exception("Failed to create read request for %s; status: %s; killing graft %d" % (xrootd_url, str(status), pid))
-
-            # Empty response indicates EOF.
-            if (response == None) or (len(response) == 0):
-                logging.debug("Finished processing URL %s" % xrootd_url)
-                os.close(writefp)
-                os.waitpid(pid, 0)
-                os.chmod(output_filename, output_mode)
-                break
-            else:
+    next_offset = 0
+    try:
+        with client.http.stream("GET", client.join_url(server_path), follow_redirects=True) as resp:
+            if resp.status_code in (401, 403):
+                raise Exception("Permission denied (HTTP %d) for URL %s" % (resp.status_code, url))
+            resp.raise_for_status()
+            for chunk in resp.iter_bytes(chunk_size=1024*1024):
+                if (deadline > 0) and (time.time() > deadline):
+                    raise Exception("Timed out when transferring URL %s" % url)
+                if not chunk:
+                    continue
                 try:
-                    os.write(writefp, response)
+                    os.write(writefp, chunk)
                 except OSError as oe:
                     if oe.errno != errno.EPIPE:
                         raise
                     logging.error("cvmfs_swissknife process unexpectedly died.")
+                    os.close(writefp)
+                    os.waitpid(pid, 0)
                     return False
-                next_offset += len(response)
-        return next_offset
-
-
-def process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode, deadline):
-    """
-    Process and create a CVMFS checksum / graft file.
-
-    If a GridFTP server is available, use that to generate a checksum file.  Otherwise,
-    utilize Xrootd to download the file to memory and checksum it locally.
-    """
-    if not gridftp_url:
-        return process_download_file(xrootd_url, output_filename, output_mode, deadline)
-
-    if (deadline > 0) and (time.time() > deadline):
-        raise Exception("URL %s timed out when still in processing queue." % xrootd_url)
-
-    parsed = urllib.parse.urlparse(gridftp_url)
-    logging.info("Querying GridFTP server for %s" % gridftp_url)
-    try:
-        if subprocess32:
-            output = subprocess32.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path], timeout=5*60)
-        else:
-            output = subprocess.check_output(["uberftp", parsed.netloc, "quote cksm cvmfs 0 -1 %s" % parsed.path])
-    except subprocess.CalledProcessError as cpe:  # https://bugs.python.org/issue9400 - CalledProcessError messes up multiprocessing
-        raise Exception("UberFTP call failed. (cmd=%s, output=%s, returncode=%s)" % (cpe.cmd, cpe.output, str(cpe.returncode)))
-    except Exception as e:
-        logging.error("Unhandled exception %s" % str(e))
-        raise Exception("UberFTP call failed with an unhandled exception.")
-    cvmfs_cksum = None
-    for line in output.splitlines():
-        line = line.strip()
-        if line.startswith("500"):
-            raise Exception(line)
-        elif line.startswith("213 "):
-            cvmfs_cksum = line[4:]
-    if cvmfs_cksum:
-        with open(output_filename, "w") as fp:
+                next_offset += len(chunk)
+    except Exception:
+        # Clean up the graft child before propagating the failure.
+        try:
+            os.kill(pid, signal.SIGKILL)
+            os.waitpid(pid, 0)
+        except OSError:
             pass
-        graftfile = cvmfs_cksum.replace(";", "\n")
-        with open(graft_filename(output_filename), "w") as fp:
-            fp.write(graftfile + "\n")
-    else:
-        raise Exception("Remote GridFTP server did not return a CVMFS checksum")
-    return 0
+        try:
+            os.close(writefp)
+        except OSError:
+            pass
+        raise
+
+    logging.debug("Finished processing URL %s" % url)
+    os.close(writefp)
+    os.waitpid(pid, 0)
+    os.chmod(output_filename, output_mode)
+    return next_offset
 
 
-def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], include=[], thread_count=2, deadline=0):
+def process_checksum_file(connection, server_path, output_filename, output_mode, deadline):
+    """
+    Process and create a CVMFS checksum / graft file by downloading the file
+    over WebDAV and streaming it through cvmfs_swissknife.
+    """
+    return process_download_file(connection, server_path, output_filename, output_mode, deadline)
+
+
+def process_files(base_url, output_dir, count, ignore=[], include=[], thread_count=2, deadline=0):
     global g_bytes_xfer
 
-    current = 0
-    worklist = []
-
-    xrootd_base_parsed = urllib.parse.urlparse(base_url)
-    xrootd_connection_info = xrootd_base_parsed.scheme + "://" + xrootd_base_parsed.netloc
-    xrootd_directory = xrootd_base_parsed.path
+    base_parsed = urllib.parse.urlparse(base_url)
+    connection = base_parsed.scheme + "://" + base_parsed.netloc
+    directory = base_parsed.path
 
     # First, try to retrieve the file
     pool = multiprocessing.Pool(count)
     futures = []
-    for filename, statinfo in process_dir(xrootd_connection_info, xrootd_directory, output_dir, ignore=ignore, include=include, thread_count=thread_count):
+    for filename, size, executable in process_dir(connection, directory, output_dir, ignore=ignore, include=include, thread_count=thread_count):
         if deadline and (time.time() > deadline):
             logging.error("Passed deadline when scanning directory tree")
             break
@@ -315,16 +383,11 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
         #if len(futures) >= 200:
             logging.info("Queue of 50k files to checksum has been reached; will attempt remainder next time.")
             break
-        if gridftp_base_url:
-            gridftp_url = gridftp_base_url + filename
-        else:
-            gridftp_url = None
-        xrootd_url = base_url + filename
+        server_path = directory + filename
         output_filename = output_dir + filename
         input_url = base_url + filename
 
-        size = statinfo.size
-        if (statinfo.flags & XRootD.client.flags.StatInfoFlags.X_BIT_SET):
+        if executable:
             output_mode = 0o755 # Is executable, set 755
         else:
             output_mode = 0o644 # Else 644
@@ -333,7 +396,7 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
             continue
         if should_ignore_filename(filename):
             continue
-        future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, output_mode, deadline))
+        future = pool.apply_async(process_checksum_file, (connection, server_path, output_filename, output_mode, deadline))
         future.filename = filename
         future.size = size
         futures.append(future)
@@ -354,37 +417,13 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
                 if "permission denied" in str(e).lower():
                     print("Skipping permission denied error")
                 else:
-                    g_failed_files.append(gridftp_base_url + "/" + future.filename)
-                #g_failed_files.append(gridftp_base_url + "/" + future.filename)
+                    g_failed_files.append(base_url + "/" + future.filename)
         futures = timed_out_futures
     logging.info("All jobs processed - closing up pool.")
     pool.join()
 
 
-def lookup_dataserver(redirector, path, timeout=10):
-    """
-    Look up an individual data server from a redirector.
-    If lookup fails, return the original redirector.
-
-    For sites where the redirector does not have the cluster filesystem
-    mounted, dirlist requests will fail. Use this function to select
-    a data server.
-    """
-
-    fs = XRootD.client.FileSystem(redirector)
-
-    handler = XRootD.client.utils.AsyncResponseHandler()
-    status = fs.stat(path, timeout=timeout, callback=handler)
-    status, _, hostlist = handler.wait()
-
-    if status.ok:
-        # Return the last URL in the hostlist (the data server)
-        return(str(list(hostlist)[-1].url))
-    else:
-        return redirector
-
-
-def list_dir(work_queue, results_queue, fs):
+def list_dir(work_queue, results_queue, client):
     """
     Helper thread for listing directories in parallel
     """
@@ -392,33 +431,34 @@ def list_dir(work_queue, results_queue, fs):
         cwd = work_queue.get()
         logging.debug("%s working on directory listing of %s" % (threading.current_thread().name, cwd))
         starttime = time.time()
-        status = None
-        dirlist = None
+        entries = None
+        error = None
         try:
-            status, dirlist = fs.dirlist(cwd,
-                                        flags=XRootD.client.flags.DirListFlags.STAT)
+            entries = propfind_dir(client, cwd)
         except Exception as e:
-            logging.error("Exception encoutered when listing directory %s: %s" % (cwd, str(e)))
+            error = e
+            logging.error("Exception encountered when listing directory %s: %s" % (cwd, str(e)))
         finally:
-            results_queue.put((status, dirlist, cwd, starttime), True)
+            results_queue.put((error, entries, cwd, starttime), True)
             work_queue.task_done()
 
 
-def start_listing_workers(thread_count, work_queue, results_queue, fs):
+def start_listing_workers(thread_count, work_queue, results_queue, client):
     """
     Helper function for launching the directory spider threads
     """
     for count in range(thread_count):
-        t = threading.Thread(target=list_dir, args=(work_queue, results_queue, fs), name="Directory list worker %d" % count)
+        t = threading.Thread(target=list_dir, args=(work_queue, results_queue, client), name="Directory list worker %d" % count)
         t.setDaemon(True)
         t.start()
 
 
-def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_count=2):
+def process_dir(connection, directory, output_dir, ignore=[], include=[], thread_count=2):
     global g_failed_dirs
-    base_data_url = lookup_dataserver(base_url, directory)
-    fs = XRootD.client.FileSystem(base_data_url)
-    logging.info("Switching from redirector %s to data server %s" % (base_url, base_data_url))
+    # A single webdav4 client shared across the listing threads; httpx clients
+    # are safe for concurrent use across threads.  HTTP redirects are followed
+    # transparently, so no explicit redirector-to-dataserver lookup is needed.
+    client = make_client(connection)
     logging.info("Starting processing of top-level directory %s", directory)
     worklist = [directory]
     base_len = len(directory)
@@ -429,7 +469,7 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
     work_sent = 0
     results_queue = queue.Queue() # shouldn't block
     results_received = 0
-    start_listing_workers(thread_count, work_queue, results_queue, fs)
+    start_listing_workers(thread_count, work_queue, results_queue, client)
 
     while worklist or (work_sent != results_received):
 
@@ -451,20 +491,19 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
             work_queue.put(cwd, block=True)
 
         # Process results serially.
-        status, dirlist, cwd, starttime = results_queue.get(True)
+        error, entries, cwd, starttime = results_queue.get(True)
         logging.info("Processing entries of %s" % cwd)
         results_queue.task_done()
         results_received += 1
-        if status.status:
-            logging.warning("Failed to list directory (%s) skipping: %s" % (cwd, status))
-            if "permission denied" in str(status).lower():
+        if error is not None or entries is None:
+            logging.warning("Failed to list directory (%s) skipping: %s" % (cwd, error))
+            if error is not None and "permission denied" in str(error).lower():
                 print("Skipping permission denied error")
             else:
                 g_failed_dirs.append(str(cwd))
             continue
 
-        xrootd_cwd_names = set()
-        entries = list(dirlist.dirlist)
+        cwd_names = set()
         logging.debug("Directory %s has %d entries" % (cwd, len(entries)))
         if cwd == top_level_dir:
             print(("%s is the top level directory" % (cwd)))
@@ -476,13 +515,12 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
         for entry in entries:
             if should_ignore_path(cwd + "/" + entry.name, ignore, include):
                 continue
-            # Sometimes the remote XRootD will prefix the name with '/'
-            xrootd_cwd_names.add(entry.name.split("/")[-1])
-            if entry.statinfo.flags & XRootD.client.flags.StatInfoFlags.IS_DIR:
+            cwd_names.add(entry.name)
+            if entry.is_dir:
                 worklist.append(cwd + "/" + entry.name)
             else:
                 fname = cwd + "/" + entry.name
-                yield (fname[base_len:], entry.statinfo)
+                yield (fname[base_len:], entry.size, entry.executable)
         cwd_output = output_dir + "/" + cwd[len(directory):]
         try:
             cwd_output_names = set(os.listdir(cwd_output))
@@ -492,7 +530,7 @@ def process_dir(base_url, directory, output_dir, ignore=[], include=[], thread_c
                 continue
             else:
                 raise
-        remaining_names = cwd_output_names.difference(xrootd_cwd_names)
+        remaining_names = cwd_output_names.difference(cwd_names)
         for name in remaining_names:
             # Ignore presence of hidden files (such as the graft files).
             if name.startswith("."): continue
@@ -529,12 +567,9 @@ def main():
     for src in srcs:
         if time.time() > deadline:
             break
-        source_filelist = []
-        info = src.split(",")
-        gridftp_src = ''
-        if len(info) == 2:
-            src, gridftp_src = info
-        process_files(src, gridftp_src, dest, concurrency, ignore=opts.ignore, include=opts.include, thread_count=opts.metadata_concurrency, deadline=deadline)
+        # Tolerate a legacy "src,gridftp_src" form by ignoring the second field.
+        src = src.split(",")[0]
+        process_files(src, dest, concurrency, ignore=opts.ignore, include=opts.include, thread_count=opts.metadata_concurrency, deadline=deadline)
 
     processing_time = time.time() - starttime
     print("Total of %.1f GB in %d files processed in %.2f seconds." % (g_bytes_xfer/(1024.**3), len(g_processed_files), processing_time))

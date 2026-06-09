@@ -10,7 +10,7 @@ URL:            https://github.com/bbockelm/cvmfs-sync
 Source0:        %{name}-%{version}.tar.gz
 
 Requires:       cvmfs-server
-Requires:	xrootd-python
+Requires:	python3-webdav4
 Requires(pre): 	shadow-utils
 
 %{?systemd_requires}
@@ -58,7 +58,7 @@ install -d $RPM_BUILD_ROOT/%{_localstatedir}/cache/cvmfs-sync
 getent group cvmfs-sync >/dev/null || groupadd -r cvmfs-sync
 getent passwd cvmfs-sync >/dev/null || \
     useradd -r -g cvmfs-sync -d /var/lib/cvmfs-sync -s /sbin/nologin \
-    -c "User to synchronize CVMFS with a remote XRootD server namespace" cvmfs-sync
+    -c "User to synchronize CVMFS with a remote WebDAV server namespace" cvmfs-sync
 exit 0
 
 
