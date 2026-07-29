@@ -358,6 +358,7 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
                 #g_failed_files.append(gridftp_base_url + "/" + future.filename)
         futures = timed_out_futures
     logging.info("All jobs processed - closing up pool.")
+    pool.terminate()
     pool.join()
 
 
