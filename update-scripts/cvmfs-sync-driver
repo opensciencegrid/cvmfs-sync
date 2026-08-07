@@ -53,9 +53,6 @@ class CvmfsSyncDriver(object):
         if config.has_option(section, "include"):
             self.include = re.split(r",?\s*", config.get(section, "include"))
         self.source = config.get(section, "source")
-        self.gridftp_source = None
-        if config.has_option(section, "gridftp_source"):
-            self.gridftp_source = config.get(section, "gridftp_source")
         self.destination = config.get(section, "destination")
 
     def run(self):
@@ -74,10 +71,7 @@ class CvmfsSyncDriver(object):
         if self.include:
             command += ["--include", ",".join(self.include)]
         command += ["--verbose"]
-        source = self.source
-        if self.gridftp_source:
-            source += "," + self.gridftp_source
-        command += [source, self.destination]
+        command += [self.source, self.destination]
         process = subprocess.Popen(command)
         process.wait()
         return process.returncode
