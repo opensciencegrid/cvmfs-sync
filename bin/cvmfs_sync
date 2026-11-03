@@ -304,8 +304,11 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
     xrootd_connection_info = xrootd_base_parsed.scheme + "://" + xrootd_base_parsed.netloc
     xrootd_directory = xrootd_base_parsed.path
 
-    # First, try to retrieve the file
-    pool = multiprocessing.Pool(count)
+    # With a single worker, process files synchronously in this process instead
+    # of creating a one-process multiprocessing pool. This also provides a
+    # useful way to avoid the pool/fork interaction when diagnosing XRootD
+    # transfer issues.
+    pool = multiprocessing.Pool(count) if count > 1 else None
     futures = []
     for filename, statinfo in process_dir(xrootd_connection_info, xrootd_directory, output_dir, ignore=ignore, include=include, thread_count=thread_count):
         if deadline and (time.time() > deadline):
@@ -333,12 +336,25 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
             continue
         if should_ignore_filename(filename):
             continue
-        future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, output_mode, deadline))
-        future.filename = filename
-        future.size = size
-        futures.append(future)
+        if pool is None:
+            try:
+                process_checksum_file(gridftp_url, xrootd_url, output_filename, output_mode, deadline)
+                g_processed_files.append(filename)
+                g_bytes_xfer += size
+            except Exception as e:
+                logging.error("Failure when trying to checksum %s (size %d); will regenerate.  Exception type: %s; %s" % (filename, size, type(e).__name__, str(e)))
+                if "permission denied" in str(e).lower():
+                    print("Skipping permission denied error")
+                else:
+                    g_failed_files.append(gridftp_base_url + "/" + filename)
+        else:
+            future = pool.apply_async(process_checksum_file, (gridftp_url, xrootd_url, output_filename, output_mode, deadline))
+            future.filename = filename
+            future.size = size
+            futures.append(future)
         #break
-    pool.close()
+    if pool is not None:
+        pool.close()
     while futures:
         timed_out_futures = []
         for future in futures:
@@ -357,9 +373,10 @@ def process_files(base_url, gridftp_base_url, output_dir, count, ignore=[], incl
                     g_failed_files.append(gridftp_base_url + "/" + future.filename)
                 #g_failed_files.append(gridftp_base_url + "/" + future.filename)
         futures = timed_out_futures
-    logging.info("All jobs processed - closing up pool.")
-    pool.terminate()
-    pool.join()
+    if pool is not None:
+        logging.info("All jobs processed - closing up pool.")
+        pool.terminate()
+        pool.join()
 
 
 def lookup_dataserver(redirector, path, timeout=10):
@@ -567,5 +584,4 @@ def main():
 
 if __name__ == '__main__':
     sys.exit(main())
-
 
